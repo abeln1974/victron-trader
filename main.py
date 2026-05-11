@@ -85,9 +85,9 @@ class EnergyTrader:
             self._check_peak_shaving()
 
             # ESS keepalive: Mode 3 via VE.Bus reg 37 krever skriving hvert ~10s.
-            # Vi sender hvert 5s for å være sikre på at setpointet holdes aktivt.
+            # Vi sender hvert 3s for sikkerhet
             if self.current_action and self.current_action.action != 'idle':
-                if time.time() - last_keepalive >= 5:
+                if time.time() - last_keepalive >= 3:
                     self.victron.send_keepalive()
                     last_keepalive = time.time()
 
@@ -177,6 +177,8 @@ class EnergyTrader:
                 )
                 self.victron.set_discharge_power(abs(action.power_kw))
                 self.tracker.log_trade("peak_shave", abs(action.power_kw), 0)
+                # Sett current_action for keepalive
+                self.current_action = action
         except Exception as e:
             logger.debug(f"Peak-shave sjekk feilet: {e}")
 

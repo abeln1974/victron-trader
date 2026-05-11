@@ -185,32 +185,58 @@ class VictronModbus:
             logger.exception("set_grid_setpoint feilet")
             return False
 
-    def _ensure_external_control(self) -> None:
-        """Bytt Hub4Mode til 3 (ESS Control Disabled) før vi setter VE.Bus setpoint.
-        Det forhindrer at GX-enheten automatisk overstyrer setpointet basert
-        på grid-meter (VM-3P75CT) som ellers oppdaterer hvert sekund."""
-        if self.readonly:
-            return
+    def _ensure_external_control(self) -> bool:
+        """Sjekk at Hub4Mode=3 (ESS Control Disabled) før setpoint.
+        
+        Mode 3 krever at GX ikke overstyrer setpoint via grid-meter loop.
+        Returnerer True hvis Hub4Mode=3, False ved feil.
+        """
         try:
             r = self.client.read_holding_registers(
                 address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
-            if r and not r.isError() and r.registers[0] != self.HUB4_MODE_DISABLED:
-                self.client.write_register(
-                    address=self.REG_HUB4_MODE, value=self.HUB4_MODE_DISABLED,
-                    device_id=self.UNIT_SYSTEM)
-                logger.info("Bytter Hub4Mode → 3 (ESS Control Disabled)")
+            if r and not r.isError():
+                if r.registers[0] != self.HUB4_MODE_DISABLED:
+                    write_result = self.client.write_register(
+                        address=self.REG_HUB4_MODE, value=self.HUB4_MODE_DISABLED,
+                        device_id=self.UNIT_SYSTEM)
+                    if write_result.isError():
+                        logger.error("Kunne ikke sette Hub4Mode=3")
+                        return False
+                    logger.info("Bytter Hub4Mode → 3 (ESS Control Disabled)")
+                return True
+            else:
+                logger.error("Kunne ikke lese Hub4Mode")
+                return False
         except Exception:
             logger.exception("_ensure_external_control feilet")
+            return False
 
     def set_charge_power(self, charge_kw: float) -> bool:
         """Sett ladefart i kW. Bytter til Mode 4 (External Control) automatisk."""
-        self._ensure_external_control()
+        if not self._ensure_external_control():
+            logger.warning("Kunne ikke sikre ekstern kontroll for charge")
+            return False
         watts = int(charge_kw * 1000)
         return self.set_grid_setpoint(watts)
 
     def set_discharge_power(self, discharge_kw: float) -> bool:
         """Sett utladefart i kW. Bytter til Mode 4 (External Control) automatisk."""
-        self._ensure_external_control()
+        # Sikre ekstern kontroll og verifiser
+        if not self._ensure_external_control():
+            logger.warning("Kunne ikke sikre ekstern kontroll for discharge")
+            return False
+        
+        # Verifiser Hub4Mode=3 før setpoint
+        try:
+            r = self.client.read_holding_registers(
+                address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
+            if r.isError() or r.registers[0] != self.HUB4_MODE_DISABLED:
+                logger.warning("Hub4Mode ikke 3 før discharge setpoint")
+                return False
+        except Exception:
+            logger.warning("Kunne ikke verifisere Hub4Mode før discharge")
+            return False
+        
         watts = -int(discharge_kw * 1000)
         return self.set_grid_setpoint(watts)
 
