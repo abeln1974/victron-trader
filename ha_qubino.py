@@ -14,19 +14,20 @@ from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
-HA_URL   = os.getenv("HA_URL",   "http://192.168.1.34:8123")
-HA_TOKEN = os.getenv("HA_TOKEN", "")
+# Leses ved import — kan overstyres av instans
+_HA_URL_DEFAULT   = "https://homeassistant.abelgaard.no"
+_HA_TOKEN_DEFAULT = ""
 
-# Entity-IDs fra HA — basert på Qubino 3-Phase Smart Meter Node (ZMNHXD)
-# Tilpass disse til faktiske entity_id i din HA-installasjon
+# Entity-IDs verifisert mot HA 2026-05-11 (Qubino ZMNHXD, Z-Wave)
+# Forbruk (positiv = inn fra nett, negativ = eksport til nett)
 HA_ENTITIES = {
-    "power_l1":   "sensor.qubino_3_phase_smart_meter_node_electric_consumption_w",
-    "power_l2":   "sensor.qubino_3_phase_smart_meter_node_electric_consumption_w_2",
-    "power_l3":   "sensor.qubino_3_phase_smart_meter_node_electric_consumption_w_3",
-    "power_l4":   "sensor.qubino_3_phase_smart_meter_node_electric_consumption_w_4",  # Totalt?
-    "voltage_l1": "sensor.qubino_3_phase_smart_meter_node_electric_consumption_v",
-    "voltage_l2": "sensor.qubino_3_phase_smart_meter_node_electric_consumption_v_3",
-    "voltage_l3": "sensor.qubino_3_phase_smart_meter_node_electric_consumption_v_4",
+    "power_l1":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_6",    # L1: ~888W
+    "power_l2":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_2_2",  # L2: ~-1W
+    "power_l3":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_3_2",  # L3: ~909W
+    "voltage_l1": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_2",    # ~143V
+    "voltage_l2": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_3_2",  # ~142V
+    "voltage_l3": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_4_2",  # ~141V
+    "status":     "sensor.qubino_3_phase_smart_meter_node_status",                 # alive/dead
 }
 
 # Timeout for HA-kall — Z-Wave kan være treg
@@ -39,17 +40,23 @@ class QubinoReader:
     """Les Qubino 3-fase smartmåler fra Home Assistant."""
 
     def __init__(self):
+        self.ha_url   = os.getenv("HA_URL",   _HA_URL_DEFAULT)
+        self.ha_token = os.getenv("HA_TOKEN", _HA_TOKEN_DEFAULT)
         self._session = requests.Session()
         self._session.headers.update({
-            "Authorization": f"Bearer {HA_TOKEN}",
+            "Authorization": f"Bearer {self.ha_token}",
             "Content-Type": "application/json",
         })
+        if not self.ha_token:
+            logger.warning("HA_TOKEN ikke satt — Qubino vil ikke fungere")
 
-    def _get_state(self, entity_id: str) -> Optional[float]:
-        """Hent en enkelt entity-verdi fra HA."""
+    def _get_state(self, entity_id: str, as_str: bool = False):
+        """Hent en enkelt entity-verdi fra HA. as_str=True returnerer rå streng."""
+        if not entity_id:
+            return None
         try:
             r = self._session.get(
-                f"{HA_URL}/api/states/{entity_id}",
+                f"{self.ha_url}/api/states/{entity_id}",
                 timeout=HA_TIMEOUT
             )
             if r.status_code == 200:
@@ -57,6 +64,8 @@ class QubinoReader:
                 state = data.get("state", "unavailable")
                 if state in ("unavailable", "unknown", ""):
                     return None
+                if as_str:
+                    return state
                 return float(state)
             elif r.status_code == 404:
                 logger.debug(f"HA entity ikke funnet: {entity_id}")
@@ -76,6 +85,14 @@ class QubinoReader:
 
         Returnerer dict med l1/l2/l3/total, eller None hvis Qubino er nede.
         """
+        # Sjekk Z-Wave node-status (alive/dead) — ikke blokker på dead, bare logg
+        if "status" in HA_ENTITIES:
+            status = self._get_state(HA_ENTITIES["status"], as_str=True)
+            if status == "dead":
+                logger.warning("Qubino Z-Wave node: dead — data kan være utdatert")
+            elif status is None:
+                logger.warning("Qubino Z-Wave node: unavailable — forsøker likevel")
+
         l1 = self._get_state(HA_ENTITIES["power_l1"])
         l2 = self._get_state(HA_ENTITIES["power_l2"])
         l3 = self._get_state(HA_ENTITIES["power_l3"])

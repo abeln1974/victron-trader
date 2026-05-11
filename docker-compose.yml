@@ -77,7 +77,7 @@ services:
       - MIN_SOC=${MIN_SOC:-50}
       - MAX_SOC=${MAX_SOC:-95}
       - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
-      - HA_URL=${HA_URL:-http://192.168.1.34:8123}
+      - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}
       - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
       - WEB_PORT=8080
