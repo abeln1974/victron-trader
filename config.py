@@ -30,7 +30,7 @@ class Config:
     solar_threshold_kw: float = float(os.getenv("SOLAR_THRESHOLD_KW", "0.5"))  # Min sol for å unngå nett-lading
 
     # Strategy
-    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "0.30"))
+    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "0.10"))
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))
 
     # Paths

@@ -95,11 +95,14 @@ class Optimizer:
         sell_ore = sell_price_ore()
 
         # --- Finn de beste utlade-timene (bruk should_discharge logikk) ---
+        # NB: Plusskunde får FAST 75 øre/kWh uansett spot, så vi sorterer
+        # etter TIDSPUNKT (tidligste først) — ikke høyeste spot. Dette gjør
+        # at vi selger NÅ når SOC er høy og sol kommer, istedenfor å vente.
         profitable_hours = set()
         discharge_candidates = sorted(
-            [(i, p) for i, p in enumerate(prices) 
+            [(i, p) for i, p in enumerate(prices)
              if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour)],
-            key=lambda x: -x[1].price_ore_kwh  # Sorter etter høyeste pris
+            key=lambda x: x[0]  # Tidligste indeks først
         )
         # Beregn where vi kan utlade med tilgjengelig kapasitet
         usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
@@ -274,14 +277,15 @@ class Optimizer:
     def get_immediate_action(self, current_price: PricePoint,
                             prices: List[PricePoint],
                             soc: float, solar_kw: float = 0.0) -> Action:
-        """Get action for current hour only."""
+        """Get action for current hour only.
+
+        Prisene fra fetcher er filtrert til "future hours" (>= now), så
+        plan[0] er enten nåværende time (hvis fortsatt aktiv) eller neste.
+        Vi tar plan[0] direkte for å unngå tidssone-mismatch.
+        """
         plan = self.optimize(prices, soc, solar_kw)
-        now_utc_hour = datetime.now(timezone.utc).hour
-        for action in plan:
-            ts = action.timestamp
-            ts_hour = ts.hour if ts.tzinfo is None else ts.astimezone(timezone.utc).hour
-            if ts_hour == now_utc_hour:
-                return action
+        if plan:
+            return plan[0]
         return Action(timestamp=datetime.now(), action='idle', power_kw=0.0)
 
 

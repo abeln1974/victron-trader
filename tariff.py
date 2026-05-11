@@ -139,15 +139,19 @@ def should_charge(spot_ore: float, hour: int, min_profit_ore: float = 20.0) -> b
 def should_discharge(spot_ore: float, hour: int) -> bool:
     """
     Skal vi utlade batteriet nå?
-    Utlading er lønnsomt hvis salgsprisen > det vi betalte for å lade.
-    Siden vi bruker fast 75 øre som salgspris er dette alltid likt,
-    men vi sjekker at vi faktisk sparer noe vs å kjøpe fra grid.
+
+    VIKTIG: Norgespris-støtten er en SEPARAT statlig refusjon som vi får
+    uansett om vi selger eller bruker batteri til selvforbruk. Den skal
+    derfor IKKE trekkes fra alternativkostnaden i trading-beslutninger.
+
+    Vi sammenligner rå strømkostnad (spot + tariff + avgifter inkl mva,
+    UTEN Norgespris-fradrag) mot salgspris. Hvis spread > terskel, selg.
     """
-    current_buy = buy_price_ore(spot_ore, hour)
-    # Utlading sparer oss for å kjøpe fra grid
-    # Men kun hvis spread > min_price_diff_nok
-    spread = current_buy - sell_price_ore()
-    min_spread_ore = CONFIG.min_price_diff_nok * 100  # Convert kr to øre
+    grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
+    # Rå kjøpspris inkl mva, men UTEN Norgespris-fradrag
+    raw_buy = (spot_ore + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
+    spread = raw_buy - sell_price_ore()
+    min_spread_ore = CONFIG.min_price_diff_nok * 100
     return spread > min_spread_ore
 
 

@@ -4,7 +4,7 @@ import sys
 import time
 import signal
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from config import CONFIG
@@ -106,7 +106,8 @@ class EnergyTrader:
         """Execute one trading cycle."""
         try:
             logger.info("=" * 50)
-            logger.info(f"Trade cycle started at {datetime.now()}")
+            norwegian_time = datetime.now(timezone.utc) + timedelta(hours=2)
+            logger.info(f"Trade cycle started at {norwegian_time}")
             
             # Get current state
             soc = self.victron.get_soc()
