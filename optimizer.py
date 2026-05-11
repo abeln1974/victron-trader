@@ -39,34 +39,108 @@ class Optimizer:
     def optimize(self, prices: List[PricePoint], current_soc: float = 50.0,
                 solar_kw: float = 0.0) -> List[Action]:
         """
-        Strategi - prioritert rekkefølge:
-        1. Natt (22-06): Lad fra nett når spotpris er lav (billigst pga Norgespris)
-        2. Dag (06-22):  La sol lade batteriet GRATIS - ikke kjøp fra nett
-        3. Ettermiddag:  Utlad når spotpris er høy (spar dyr gridstrøm)
-        4. Peak-shaving: Alltid klar med 5 kWh reserve
+        Smart topp-optimering med planlegging fremover:
 
-        solar_kw: Nåværende sol-produksjon (kW) - unngå å lade fra nett når sol lader
+        1. Identifiser de N dyreste timene i planperioden → reserver batteri til dem
+        2. Identifiser de M billigste natte-timene → lad da (ikke sløs på middels priser)
+        3. Ikke utlad under salgsgrensen - det er sløsing av batteri
+        4. Peak-shaving reserve alltid satt av
+
+        solar_kw: Nåværende sol-produksjon (kW)
         """
         if not prices:
             return []
 
+        # Beregn reell kjøpspris per time
+        buy_prices = [buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour)
+                      for p in prices]
+        sell_ore = sell_price_ore()
+
+        # --- Finn de beste utlade-timene (høyeste kjøpspris = mest spart) ---
+        # Kun timer der kjøpspris > salgspris (ellers er det ikke lønnsomt)
+        profitable_hours = set()
+        discharge_candidates = sorted(
+            [(i, bp) for i, bp in enumerate(buy_prices) if bp > sell_ore],
+            key=lambda x: -x[1]  # Sorter etter høyeste pris
+        )
+        # Beregn where vi kan utlade med tilgjengelig kapasitet
+        usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
+        remaining_kwh = max(0, usable_kwh)
+        for idx, bp in discharge_candidates:
+            if remaining_kwh <= 0:
+                break
+            profitable_hours.add(idx)
+            remaining_kwh -= min(self.max_discharge, remaining_kwh)
+
+        # --- Finn de beste ladetimene (laveste kjøpspris, kun natt) ---
+        charge_hours = set()
+        night_candidates = sorted(
+            [(i, bp) for i, bp in enumerate(buy_prices)
+             if not (6 <= prices[i].timestamp.hour < 22)],  # Kun natt
+            key=lambda x: x[1]  # Sorter etter laveste pris
+        )
+        # Beregn ladekapasitet
+        space_kwh = self.capacity * (self.max_soc - current_soc) / 100
+        remaining_charge = max(0, space_kwh)
+        for idx, bp in night_candidates:
+            if remaining_charge <= 0:
+                break
+            # Lad kun hvis prisen er lav nok til å tjene på det
+            if bp < sell_ore * self.efficiency:
+                charge_hours.add(idx)
+                remaining_charge -= min(self.max_charge, remaining_charge)
+
+        # --- Bygg handlingsplan ---
         actions = []
         soc = current_soc
 
-        for p in prices:
-            spot_ore = p.price_ore_kwh / CONFIG.vat  # Konverter tilbake til eks mva
+        for i, p in enumerate(prices):
+            spot_ore = p.price_ore_kwh / CONFIG.vat
             hour = p.timestamp.hour
-            action = self._decide_action_tariff(p, soc, spot_ore, hour, solar_kw)
-            actions.append(action)
+            is_night = not (6 <= hour < 22)
+            sol_lader = solar_kw >= CONFIG.solar_threshold_kw
+            buy_ore = buy_prices[i]
 
-            # Simuler SOC-endring for planlegging
-            kwh_change = abs(action.power_kw)  # Per time
-            if action.action == 'charge':
-                soc_change = (kwh_change * self.efficiency / self.capacity) * 100
+            # UTLAD: Kun i de planlagte topp-timene
+            if i in profitable_hours and soc > self.min_soc:
+                avail_kwh = max(0, self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve)
+                power = min(self.max_discharge, avail_kwh)
+                if power > 0:
+                    savings = buy_ore - sell_ore
+                    profit = power * savings / 100
+                    actions.append(Action(
+                        timestamp=p.timestamp, action='discharge',
+                        power_kw=-power, expected_profit_nok=profit,
+                        reason=f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}ø (salg {sell_ore:.0f}ø)'
+                    ))
+                    soc_change = (power / self.efficiency / self.capacity) * 100
+                    soc = max(soc - soc_change, self.min_soc)
+                    continue
+
+            # LAD: Kun i de planlagte billige natte-timene
+            if i in charge_hours and soc < self.max_soc and is_night and not sol_lader:
+                avail_kwh = self.capacity * (self.max_soc - soc) / 100
+                power = min(self.max_charge, avail_kwh)
+                cost = power * buy_ore / 100
+                actions.append(Action(
+                    timestamp=p.timestamp, action='charge',
+                    power_kw=power, expected_profit_nok=-cost,
+                    reason=f'Billigste natt: {buy_ore:.0f}ø'
+                ))
+                soc_change = (power * self.efficiency / self.capacity) * 100
                 soc = min(soc + soc_change, self.max_soc)
-            elif action.action == 'discharge':
-                soc_change = (kwh_change / self.efficiency / self.capacity) * 100
-                soc = max(soc - soc_change, self.min_soc)
+                continue
+
+            # SOL LADER: La Fronius gjøre jobben
+            if sol_lader and not is_night:
+                actions.append(Action(
+                    timestamp=p.timestamp, action='idle', power_kw=0.0,
+                    reason=f'Sol {solar_kw:.1f}kW lader gratis'
+                ))
+                continue
+
+            # IDLE
+            actions.append(Action(timestamp=p.timestamp, action='idle', power_kw=0.0))
 
         return actions
 
