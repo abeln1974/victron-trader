@@ -9,10 +9,28 @@ from tariff import (
 )
 from config import CONFIG
 
-# Elvia: kapasitetsledd beregnes som snitt av 3 høyeste timer per mnd
-# Vi holder oss under 10.35 kW (10A-trinn = 475 kr/mnd vs 662.50 kr nå)
-PEAK_SHAVING_LIMIT_KW = float(10.0)   # Mål: hold under dette
-PEAK_SHAVING_RESERVE_KWH = float(5.0) # Hold alltid 5 kWh reservert til peak-shaving
+# Elvia nettleiepriser 2026 — kapasitetsledd (snitt 3 høyeste timer på ULIKE dager/mnd)
+# Trinn 3:  5– 9.99 kW =  418.8 kr/mnd inkl MVA
+# Trinn 4: 10–14.99 kW =  662.5 kr/mnd inkl MVA  ← vil unngå dette
+# Trinn 5: 15–19.99 kW =  837.5 kr/mnd inkl MVA
+# Besparelse ved å holde under 10kW: 662.5 - 418.8 = 243.7 kr/mnd
+# Energiledd dag (06-22): 30.79 øre/kWh inkl MVA
+# Energiledd natt (22-06): 22.88 øre/kWh inkl MVA
+PEAK_SHAVING_LIMIT_KW    = float(9.5)  # Mål: hold under 10kW (buffer 0.5kW)
+PEAK_SHAVING_RESERVE_KWH = float(5.0)  # Hold alltid 5 kWh reservert til peak-shaving
+
+# Kapasitetstrinn inkl MVA (kr/mnd) — brukes til lønnsomhetsberegning
+ELVIA_CAPACITY_STEPS = [
+    (0,    1.99,  237.5),
+    (2,    4.99,  293.8),
+    (5,    9.99,  418.8),
+    (10,  14.99,  662.5),
+    (15,  19.99,  837.5),
+    (20,  24.99, 1075.0),
+    (25,  49.99, 1437.5),
+    (50,  74.99, 2375.0),
+    (75, 9999.0, 3000.0),
+]
 
 
 @dataclass
@@ -147,12 +165,15 @@ class Optimizer:
     def peak_shave(self, current_grid_kw: float, soc: float) -> Optional[Action]:
         """
         Peak-shaving: Utlad batteriet for å hindre at effekttopper
-        fører til høyere kapasitetstrinn hos Elvia.
+        fører til høyere kapasitetstrinn hos Elvia 2026.
 
-        Elvia bruker snitt av de 3 høyeste enkelt-timene per mnd.
-        Mål: Hold under 10.35 kW (10A-trinn = 475 kr vs 662.50 kr)
+        Elvia bruker snitt av de 3 høyeste timer på ULIKE dager per mnd.
+        Mål: Hold under 9.5kW (buffer til 10kW-grensen).
+        Trinn 3 (5-9.99kW): 418.8 kr/mnd
+        Trinn 4 (10-14.99kW): 662.5 kr/mnd
+        Besparelse: 243.7 kr/mnd ved å holde seg i trinn 3.
 
-        current_grid_kw: Nåværende effekt fra nettet (målt)
+        current_grid_kw: Nåværende effekt fra nettet (målt via Qubino)
         soc: Batteriets nåværende ladenivå (%)
         """
         if current_grid_kw <= self.peak_limit_kw:
@@ -167,9 +188,9 @@ class Optimizer:
 
         discharge_kw = min(excess_kw, self.max_discharge, avail_kwh)
 
-        # Gevinst: unngår kapasitetshopp på 225 kr/mnd
-        # Fordelt per time der peak-shaving skjer (~5 timer/mnd)
-        saving_per_event = 225.0 / 5
+        # Gevinst: unngår kapasitetshopp Trinn 3→4 = 243.7 kr/mnd (Elvia 2026)
+        # Fordelt per hendelse (~5 peak-events per mnd)
+        saving_per_event = 243.7 / 5
 
         return Action(
             timestamp=datetime.now(),

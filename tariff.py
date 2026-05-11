@@ -1,63 +1,65 @@
 """Beregning av reell kjøps- og salgspris for Abelgard.
 
-Basert på Kraftriket Solstrøm-faktura april 2026:
+Basert på Elvia Nettleiepriser 2026 og Kraftriket Solstrøm:
 
 KJØP (per kWh inkl mva):
   Spotpris           (variabel, eks mva)
   + Kraftriket påslag   6.50 øre  eks mva
-  + Nettleie dag       20.63 øre  eks mva (06:00-22:00)
-  + Nettleie natt      12.50 øre  eks mva (22:00-06:00)
-  + Forbruksavgift      8.91 øre  eks mva
-  + Enova               1.25 øre  eks mva
+  + Energiledd dag     16.50 øre  eks mva (06:00-22:00)  → 30.79 øre inkl mva
+  + Energiledd natt    10.00 øre  eks mva (22:00-06:00)  → 22.88 øre inkl mva
+  + Forbruksavgift      7.13 øre  eks mva (→ 8.91 inkl mva)
+  + Enova               1.00 øre  eks mva (→ 1.25 inkl mva)
   × 1.25 (25% mva)
-  - Norgespris         96.53 øre  INGEN mva (statlig støtte, trekkes fra nettleie)
+  - Norgespris         96.53 øre  INGEN mva (statlig støtte)
   = Total reell innkjøpspris
 
 SALG som plusskunde (ingen mva):
   Kraftriket betaler flat 75.00 øre/kWh uavhengig av spot
-  Nettselskap betaler -6.25 øre/kWh for produsert energi (nettleie tilbake)
+  Nettselskap betaler -6.25 øre/kWh for produsert energi
   → Netto salgspris: 75.00 - 6.25 = 68.75 øre/kWh
 
-KAPASITETSLEDD (Elvia) - KRITISK:
-  Trinn 0-2A:    175 kr/mnd
-  Trinn 2-5A:    305 kr/mnd
-  Trinn 5-10A:   475 kr/mnd
-  Trinn 10-15A:  662.50 kr/mnd  ← Du er her (maks avlest 12.69 kW)
-  Trinn 15-20A:  887.50 kr/mnd
-  Trinn 20-25A: 1137.50 kr/mnd
+KAPASITETSLEDD (Elvia 2026) — kW-basert, inkl MVA:
+  Trinn 1:  0– 1.99 kW =  237.5 kr/mnd
+  Trinn 2:  2– 4.99 kW =  293.8 kr/mnd
+  Trinn 3:  5– 9.99 kW =  418.8 kr/mnd  ← MÅL: hold her
+  Trinn 4: 10–14.99 kW =  662.5 kr/mnd  ← vil unngå (243.7 kr dyrere)
+  Trinn 5: 15–19.99 kW =  837.5 kr/mnd
+  Trinn 6: 20–24.99 kW = 1075.0 kr/mnd
+  Trinn 7: 25–49.99 kW = 1437.5 kr/mnd
 
-  Beregning: Gjennomsnittet av de 3 høyeste enkelt-timer per mnd.
-  Du hadde 12.69 kW som høyeste time → nær 15A grensen (3.45kW/fase × 3 = 10.35kW 3-fas)
-  Elvia bruker fastopp: 15A × 230V × 3 faser = 10.35 kW
-
-  → Batteriet kan UNNGÅ at du går opp til neste trinn (887.50 kr) = 225 kr spart!
+  Beregning: Snitt av de 3 høyeste timer på ULIKE dager per mnd.
+  Peak-shaving-grense: 9.5 kW (0.5 kW buffer til 10 kW-trinnet)
+  Besparelse Trinn 3→4: 662.5 - 418.8 = 243.7 kr/mnd
 """
 import os
 from datetime import datetime
 from config import CONFIG
 
-# Konstanter fra faktura (alle eks mva)
+# Konstanter — Elvia 2026 + Kraftriket (alle eks mva)
 SUPPLIER_MARKUP_ORE  = float(os.getenv("SUPPLIER_MARKUP_ORE",   "6.50"))
-GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "20.63"))
-GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","12.50"))
-CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "8.91"))
-ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.25"))
+GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva → 30.79 inkl
+GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva → 22.88 inkl
+CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # Elvia 2026
+ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # Elvia 2026
 NORGES_PRICE_ORE     = float(os.getenv("NORGES_PRICE_ORE",      "96.53"))  # Statlig støtte, ingen mva
-CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))
+CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "418.80"))  # Trinn 3 (5-9.99kW) inkl MVA
 SELL_PRICE_ORE       = float(os.getenv("SELL_PRICE_ORE",        "75.00"))  # Kraftriket betaler eks mva
 NET_SELL_BACK_ORE    = float(os.getenv("NET_SELL_BACK_ORE",      "6.25"))  # Nettselskap betaler tilbake
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 
-# Kapasitetstrinn (Elvia, 2026)
+# Kapasitetstrinn (Elvia 2026, kW-basert, inkl MVA)
+# Format: (kW_grense, kr_per_mnd)
 CAPACITY_TIERS = [
-    (2,   175.00),
-    (5,   305.00),
-    (10,  475.00),
-    (15,  662.50),
-    (20,  887.50),
-    (25, 1137.50),
-    (63, 1537.50),
+    (2,    237.5),
+    (5,    293.8),
+    (10,   418.8),
+    (15,   662.5),
+    (20,   837.5),
+    (25,  1075.0),
+    (50,  1437.5),
+    (75,  2375.0),
+    (9999, 3000.0),
 ]
 
 VAT = CONFIG.vat  # 1.25
@@ -95,10 +97,9 @@ def sell_price_ore() -> float:
 
 
 def capacity_charge_for_kw(peak_kw: float) -> float:
-    """Returner kapasitetsledd for gitt toppeffekt (kW)."""
-    amps = peak_kw / (0.230 * 3)  # 3-fase 230V
-    for limit_a, charge_nok in CAPACITY_TIERS:
-        if amps <= limit_a:
+    """Returner kapasitetsledd for gitt toppeffekt (kW) — Elvia 2026 kW-basert."""
+    for limit_kw, charge_nok in CAPACITY_TIERS:
+        if peak_kw < limit_kw:
             return charge_nok
     return CAPACITY_TIERS[-1][1]
 
