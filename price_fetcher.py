@@ -1,6 +1,6 @@
 """Henter spotpriser fra hvakosterstrommen.no API."""
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import List, Optional
 from config import CONFIG
@@ -39,7 +39,8 @@ class PriceFetcher:
 
     def get_prices(self, hours: int = 24) -> List[PricePoint]:
         """Get prices for next N hours (today + tomorrow if available)."""
-        now = datetime.now()
+        # Bruk timezone-aware datetime (priser fra API er UTC)
+        now = datetime.now(timezone.utc)
         today = now.date()
         tomorrow = today + timedelta(days=1)
 
