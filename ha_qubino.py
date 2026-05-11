@@ -219,10 +219,6 @@ class EVCSController:
             logger.debug(f"EVCS fetch feil: {e}")
         return False
 
-    def _state(self, suffix: str) -> str:
-        return self._cache.get(f"{suffix.split('.')[0]}.{self._prefix}_{suffix.split('_',1)[-1]}"
-                               if '.' not in suffix else suffix, "unknown")
-
     def _call(self, domain: str, service: str, data: dict) -> bool:
         try:
             r = self._session.post(

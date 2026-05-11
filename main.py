@@ -117,10 +117,10 @@ class EnergyTrader:
                         grid_w = self._get_grid_power() or 0
                         discharge_w = abs(self.current_action.power_kw) * 1000
                         # Hvis grid ikke er negativ nok → forbruket spiser batteriet lokalt
-                        if grid_w > -(discharge_w * 0.3):  # Toleranse: 30% kan gå til lokalt forbruk
+                        if grid_w > -(discharge_w * 0.6):  # Toleranse: 60% kan gå til lokalt forbruk
                             logger.warning(
                                 f"Export-guard: Grid {grid_w:.0f}W — lokalt forbruk for høyt, "
-                                f"stopper utlading (elbil/last?)"
+                                f"stopper utlading (elbil/last?) — grid={grid_w:.0f}W, grense={-(discharge_w*0.6):.0f}W"
                             )
                             self.victron.stop_ess_control()
                             self.current_action = None
@@ -232,7 +232,6 @@ class EnergyTrader:
                     f"Utlader {abs(action.power_kw):.1f}kW fra batteri."
                 )
                 self.victron.set_discharge_power(abs(action.power_kw))
-                self.tracker.log_trade("peak_shave", abs(action.power_kw), 0)
                 # Sett current_action for keepalive
                 self.current_action = action
         except Exception as e:

@@ -50,7 +50,7 @@ NET_SELL_BACK_ORE    = float(os.getenv("NET_SELL_BACK_ORE",      "6.25"))  # Fø
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 
-# Kapasitetstrinn (Elvia 2026, kW-basert, inkl MVA)
+# Kapasitetstrinn (Føie AS 2026, kW-basert, inkl MVA)
 # Format: (kW_grense, kr_per_mnd)
 CAPACITY_TIERS = [
     (2,    237.5),
@@ -99,7 +99,7 @@ def sell_price_ore() -> float:
 
 
 def capacity_charge_for_kw(peak_kw: float) -> float:
-    """Returner kapasitetsledd for gitt toppeffekt (kW) — Elvia 2026 kW-basert."""
+    """Returner kapasitetsledd for gitt toppeffekt (kW) — Føie AS 2026 kW-basert."""
     for limit_kw, charge_nok in CAPACITY_TIERS:
         if peak_kw < limit_kw:
             return charge_nok

@@ -88,7 +88,7 @@ class ProfitTracker:
         conn = sqlite3.connect(self.db_path)
         if days:
             cursor = conn.execute(
-                "SELECT SUM(net_profit_nok) FROM trades WHERE datetime(timestamp) > datetime('now', ? || ' days')",
+                "SELECT SUM(net_profit_nok) FROM trades WHERE datetime(timestamp) > datetime('now', 'localtime', ? || ' days')",
                 (f"-{int(days)}",)
             )
         else:
