@@ -7,18 +7,19 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from config import CONFIG
+from config import CONFIG, OSLO_TZ
 from price_fetcher import PriceFetcher
 from optimizer import Optimizer, Action
 from victron_modbus import VictronModbus
 from profit_tracker import ProfitTracker
-from ha_qubino import QubinoReader
+from ha_qubino import QubinoReader, EVCSController
 
-# Setup logging
+# Setup logging med norsk tid
 logging.basicConfig(
     level=getattr(logging, CONFIG.log_level),
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+logging.Formatter.converter = lambda *args: datetime.now(OSLO_TZ).timetuple()
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +29,7 @@ class EnergyTrader:
         self.optimizer = Optimizer()
         self.victron = VictronModbus()
         self.qubino  = QubinoReader()   # Primærkilde grid total (inkl L3, via _w_6)
+        self.evcs   = EVCSController()     # Elbil-lader styring via HA
         self.tracker = ProfitTracker()
         self.running = False
         self.current_action: Optional[Action] = None
@@ -45,9 +47,11 @@ class EnergyTrader:
         logger.info(f"Connected via Modbus-TCP. Reading SOC...")
         time.sleep(1)
 
-        # Behold Optimized without BatteryLife (modus 2) — NMC-batteri tåler ikke
-        # langvarig fulladning. ESS styrer aktivt ned fra 100%. Vi bruker grid
-        # setpoint (reg2716) som overlay for peak-shaving og trading.
+        # Startup-reset: nullstill alltid reg37 og Hub4Mode=2 ved oppstart.
+        # Rydder opp etter eventuell krasj der Hub4Mode=3 ble stående.
+        self.victron.stop_ess_control()
+        logger.info("Startup-reset: reg37=0, Hub4Mode=2 (rydder etter evt. krasj)")
+
         mode = self.victron.get_ess_mode()
         logger.info(f"ESS modus: {mode} (2=Optimized, 4=ExternalControl)")
         if mode != self.victron.HUB4_MODE_OPTIMIZED:
@@ -57,6 +61,8 @@ class EnergyTrader:
         self.victron.set_min_soc(CONFIG.min_soc)
         logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}% (NMC 20-90%)")
 
+        self._action_start_soc: Optional[float] = None  # SOC ved start av aktiv handling
+        self._last_price_nok: float = 0.0               # Siste spotpris (kr/kWh)
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -75,7 +81,7 @@ class EnergyTrader:
         last_peak_shave = 0.0  # Siste peak-shave sjekk
 
         while self.running:
-            now = datetime.now()
+            now = datetime.now(OSLO_TZ)
             current_time = time.time()
 
             # Kjør handelslogikk ved start av hver time
@@ -83,17 +89,62 @@ class EnergyTrader:
                 last_hour = now.hour
                 self._execute_trade_cycle()
 
-            # Peak-shaving: sjekk grid-effekt hvert 10. sekund
+            # Peak-shaving + EVCS-koordinering hvert 10. sekund
             if current_time - last_peak_shave >= 10:
                 self._check_peak_shaving()
+                try:
+                    grid_w  = self._get_grid_power() or 0
+                    solar_w = self.victron.get_solar_power() or 0
+                    bat_w   = self.victron.get_battery_power() or 0
+                    act     = self.current_action.action if self.current_action else 'idle'
+                    self.evcs.adjust_for_trading(
+                        battery_action=act,
+                        grid_kw=grid_w / 1000,
+                        solar_kw=solar_w / 1000,
+                        battery_kw=bat_w / 1000)
+                except Exception:
+                    pass
                 last_peak_shave = current_time
 
             # ESS keepalive: Mode 3 via VE.Bus reg 37 krever skriving hvert ~10s.
-            # Vi sender hvert 3s for sikkerhet
-            if self.current_action and self.current_action.action != 'idle':
+            # Vi sender hvert 3s for sikkerhet — men kun hvis action gjelder nåværende time
+            action_hour = self.current_action.timestamp.astimezone(OSLO_TZ).hour if self.current_action else -1
+            if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
                 if current_time - last_keepalive >= 3:
-                    self.victron.send_keepalive()
+                    # Export-guard: sjekk at vi faktisk eksporterer til nett.
+                    # Hvis lokalt forbruk (elbil etc) spiser opp batteriet, stopp utlading.
+                    if self.current_action.action == 'discharge':
+                        grid_w = self._get_grid_power() or 0
+                        discharge_w = abs(self.current_action.power_kw) * 1000
+                        # Hvis grid ikke er negativ nok → forbruket spiser batteriet lokalt
+                        if grid_w > -(discharge_w * 0.3):  # Toleranse: 30% kan gå til lokalt forbruk
+                            logger.warning(
+                                f"Export-guard: Grid {grid_w:.0f}W — lokalt forbruk for høyt, "
+                                f"stopper utlading (elbil/last?)"
+                            )
+                            self.victron.stop_ess_control()
+                            self.current_action = None
+                            self._action_start_soc = None
+                        else:
+                            self.victron.send_keepalive()
+                    else:
+                        self.victron.send_keepalive()
                     last_keepalive = current_time
+            elif self.current_action and self.current_action.action != 'idle' and action_hour != now.hour:
+                # Action tilhører en annen time — logg faktisk kWh basert på SOC-endring og stopp
+                end_soc = self.victron.get_soc() or 0
+                if self._action_start_soc is not None:
+                    delta_soc = abs(end_soc - self._action_start_soc)
+                    actual_kwh = CONFIG.battery_capacity_kwh * delta_soc / 100
+                    if actual_kwh > 0.05:
+                        act = self.current_action.action
+                        db_action = "sell" if act == "discharge" else "buy"
+                        self.tracker.log_trade(db_action, actual_kwh, self._last_price_nok)
+                        logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
+                logger.info(f"Action fra time {action_hour:02d} utgått (nå {now.hour:02d}) — stopper ESS")
+                self.victron.stop_ess_control()
+                self.current_action = None
+                self._action_start_soc = None
 
             # Log status hvert 5. minutt
             if now.minute % 5 == 0 and now.minute != last_status_min:
@@ -106,8 +157,7 @@ class EnergyTrader:
         """Execute one trading cycle."""
         try:
             logger.info("=" * 50)
-            norwegian_time = datetime.now(timezone.utc) + timedelta(hours=2)
-            logger.info(f"Trade cycle started at {norwegian_time}")
+            logger.info(f"Trade cycle started at {datetime.now(OSLO_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
             
             # Get current state
             soc = self.victron.get_soc()
@@ -125,6 +175,7 @@ class EnergyTrader:
                 return
             
             logger.info(f"Current price: {current.price_nok_kwh:.3f} kr/kWh")
+            self._last_price_nok = current.price_nok_kwh
 
             # Les sol-produksjon
             solar_w = self.victron.get_solar_power() or 0
@@ -200,7 +251,7 @@ class EnergyTrader:
             
             success = self.victron.set_charge_power(action.power_kw)
             if success:
-                self.tracker.log_trade("buy", energy_kwh, price)
+                self._action_start_soc = soc  # Merk start-SOC
                 logger.info(f"Charging {action.power_kw:.1f}kW")
                 self.current_action = action  # Sett for keepalive
             
@@ -212,7 +263,7 @@ class EnergyTrader:
 
             success = self.victron.set_discharge_power(abs(action.power_kw))
             if success:
-                self.tracker.log_trade("sell", energy_kwh, price)
+                self._action_start_soc = soc  # Merk start-SOC
                 logger.info(f"Discharging {abs(action.power_kw):.1f}kW | {action.reason}")
                 self.current_action = action  # Sett for keepalive
 
@@ -239,6 +290,7 @@ class EnergyTrader:
         logger.info("Stopping...")
         
         # Nullstill setpoint og tilbakestill ESS til Mode 2
+        self.evcs.restore_auto()  # Tilbakestill EVCS til auto ved shutdown
         if hasattr(self.victron, '_connected') and self.victron._connected:
             self.victron.stop_ess_control()  # Tilbake til Hub4Mode=2 og nullstill reg 37
             time.sleep(1)

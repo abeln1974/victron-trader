@@ -3,39 +3,23 @@ from dataclasses import dataclass
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import logging
-
-def get_norwegian_utc_offset(timestamp: datetime) -> int:
-    """Returnerer UTC offset for Norge (1 for vintertid, 2 for sommertid).
-    
-    Norsk DST (siste søndag i mars/oktober):
-    - Sommertid: Siste søndag i mars kl 03:00 UTC → UTC+2
-    - Vintertid: Siste søndag i oktober kl 02:00 UTC → UTC+1
-    """
-    # Enkel regel: sommertid ca 29.mars - 25.oktober
-    # Dette er tilstrekkelig nøyaktig for formålet
-    if 3 <= timestamp.month <= 10:
-        if timestamp.month == 3 and timestamp.day < 25:
-            return 1  # Før sommertid
-        elif timestamp.month == 10 and timestamp.day >= 25:
-            return 1  # Etter vintertid
-        else:
-            return 2  # Sommertid
-    else:
-        return 1  # Vintertid (november-februar)
 from price_fetcher import PricePoint, PriceFetcher
 from tariff import (
     buy_price_ore, sell_price_ore, should_charge, should_discharge,
-    capacity_charge_for_kw, CAPACITY_CHARGE_NOK
+    capacity_charge_for_kw, CAPACITY_CHARGE_NOK,
+    GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE,
+    SUPPLIER_MARKUP_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, VAT as TARIFF_VAT,
+    is_day_tariff
 )
-from config import CONFIG
+from config import CONFIG, OSLO_TZ
 
-# Elvia nettleiepriser 2026 — kapasitetsledd (snitt 3 høyeste timer på ULIKE dager/mnd)
+# Føie AS nettleiepriser 2026 — kapasitetsledd (snitt 3 høyeste timer på ULIKE dager/mnd)
 # Trinn 3:  5– 9.99 kW =  418.8 kr/mnd inkl MVA
-# Trinn 4: 10–14.99 kW =  662.5 kr/mnd inkl MVA  ← vil unngå dette
+# Trinn 4: 10–14.99 kW =  662.5 kr/mnd inkl MVA  ← faktisk trinn apr 2026 (avregnet 12.09 kW)
 # Trinn 5: 15–19.99 kW =  837.5 kr/mnd inkl MVA
 # Besparelse ved å holde under 10kW: 662.5 - 418.8 = 243.7 kr/mnd
-# Energiledd dag (06-22): 30.79 øre/kWh inkl MVA
-# Energiledd natt (22-06): 22.88 øre/kWh inkl MVA
+# Energiledd dag (06-22): 16.50 øre eks mva → 20.63 øre inkl mva (Føie AS)
+# Energiledd natt (22-06): 10.00 øre eks mva → 12.50 øre inkl mva (Føie AS)
 PEAK_SHAVING_LIMIT_KW    = float(9.5)  # Mål: hold under 10kW (buffer 0.5kW)
 PEAK_SHAVING_RESERVE_KWH = float(5.0)  # Hold alltid 5 kWh reservert til peak-shaving
 
@@ -89,22 +73,33 @@ class Optimizer:
         if not prices:
             return []
 
-        # Beregn reell kjøpspris per time
-        buy_prices = [buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour)
+        # Beregn reell kjøpspris per time (bruk norsk time for dag/natt-tariff)
+        buy_prices = [buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)
                       for p in prices]
         sell_ore = sell_price_ore()
 
-        # --- Finn de beste utlade-timene (bruk should_discharge logikk) ---
-        # NB: Plusskunde får FAST 75 øre/kWh uansett spot, så vi sorterer
-        # etter TIDSPUNKT (tidligste først) — ikke høyeste spot. Dette gjør
-        # at vi selger NÅ når SOC er høy og sol kommer, istedenfor å vente.
+        # --- Finn de beste utlade-timene ---
+        # Strategi: Selg i de N timene med HØYEST råkjøpspris (hva nett faktisk koster
+        # uten Norgespris-fradrag). Sorter etter høyeste råkjøpspris, ikke tidspunkt.
+        # Dette sikrer at vi sparer batteri til de mest verdifulle timene.
+        def raw_buy(p):
+            h = p.timestamp.astimezone(OSLO_TZ).hour
+            grid = GRID_TARIFF_DAY_ORE if is_day_tariff(h) else GRID_TARIFF_NIGHT_ORE
+            return (p.price_ore_kwh / CONFIG.vat + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
+
+        # Beregn median råkjøpspris i perioden — selg kun i timer over medianen
+        all_raw = sorted([raw_buy(p) for p in prices])
+        median_raw = all_raw[len(all_raw) // 2]
+
         profitable_hours = set()
         discharge_candidates = sorted(
             [(i, p) for i, p in enumerate(prices)
-             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour)],
-            key=lambda x: x[0]  # Tidligste indeks først
+             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)
+             and raw_buy(p) >= median_raw],  # Kun topp-halvdelen av priser
+            key=lambda x: raw_buy(x[1]),  # Høyeste råkjøpspris først
+            reverse=True
         )
-        # Beregn where vi kan utlade med tilgjengelig kapasitet
+        # Beregn tilgjengelig kapasitet
         usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
         remaining_kwh = max(0, usable_kwh)
         for idx, price_point in discharge_candidates:
@@ -117,11 +112,13 @@ class Optimizer:
         charge_hours = set()
         night_candidates = sorted(
             [(i, bp) for i, bp in enumerate(buy_prices)
-             if not (6 <= prices[i].timestamp.hour < 22)],  # Kun natt
+             if not (6 <= prices[i].timestamp.astimezone(OSLO_TZ).hour < 22)],  # Kun natt
             key=lambda x: x[1]  # Sorter etter laveste pris
         )
-        # Beregn ladekapasitet
-        space_kwh = self.capacity * (self.max_soc - current_soc) / 100
+        # Beregn ladekapasitet etter planlagt utlading (ikke nåværende SOC)
+        discharged_kwh = len(profitable_hours) * self.max_discharge  # Approx
+        soc_after_discharge = max(self.min_soc, current_soc - (discharged_kwh / self.capacity * 100))
+        space_kwh = self.capacity * (self.max_soc - soc_after_discharge) / 100
         remaining_charge = max(0, space_kwh)
         for idx, bp in night_candidates:
             if remaining_charge <= 0:
@@ -137,10 +134,7 @@ class Optimizer:
 
         for i, p in enumerate(prices):
             spot_ore = p.price_ore_kwh / CONFIG.vat
-            hour = p.timestamp.hour
-            # Konverter UTC til lokal tid (automatisk sommer/vintertid)
-            utc_offset = get_norwegian_utc_offset(p.timestamp)
-            local_hour = (hour + utc_offset) % 24
+            local_hour = p.timestamp.astimezone(OSLO_TZ).hour
             is_night = not (6 <= local_hour < 22)
             sol_lader = solar_kw >= CONFIG.solar_threshold_kw
             buy_ore = buy_prices[i]
@@ -191,12 +185,12 @@ class Optimizer:
     def peak_shave(self, current_grid_kw: float, soc: float) -> Optional[Action]:
         """
         Peak-shaving: Utlad batteriet for å hindre at effekttopper
-        fører til høyere kapasitetstrinn hos Elvia 2026.
+        fører til høyere kapasitetstrinn hos Føie AS 2026.
 
-        Elvia bruker snitt av de 3 høyeste timer på ULIKE dager per mnd.
+        Føie AS bruker snitt av de 3 høyeste timer på ULIKE dager per mnd.
         Mål: Hold under 9.5kW (buffer til 10kW-grensen).
         Trinn 3 (5-9.99kW): 418.8 kr/mnd
-        Trinn 4 (10-14.99kW): 662.5 kr/mnd
+        Trinn 4 (10-14.99kW): 662.5 kr/mnd  ← faktisk trinn nå (12.09 kW avregnet)
         Besparelse: 243.7 kr/mnd ved å holde seg i trinn 3.
 
         current_grid_kw: Nåværende effekt fra nettet (målt via Qubino)
@@ -214,12 +208,12 @@ class Optimizer:
 
         discharge_kw = min(excess_kw, self.max_discharge, avail_kwh)
 
-        # Gevinst: unngår kapasitetshopp Trinn 3→4 = 243.7 kr/mnd (Elvia 2026)
+        # Gevinst: unngår kapasitetshopp Trinn 3→4 = 243.7 kr/mnd (Føie AS 2026)
         # Fordelt per hendelse (~5 peak-events per mnd)
         saving_per_event = 243.7 / 5
 
         return Action(
-            timestamp=datetime.now(),
+            timestamp=datetime.now(OSLO_TZ),
             action='peak_shave',
             power_kw=-discharge_kw,
             expected_profit_nok=saving_per_event,
@@ -238,16 +232,14 @@ class Optimizer:
            - Om dagen lader sol gratis → ikke kast penger på nett-lading
         3. Idle: Sol håndterer lading, ESS styrer selv
         """
-        buy_ore  = buy_price_ore(spot_ore, hour)
+        local_hour = price.timestamp.astimezone(OSLO_TZ).hour
+        buy_ore  = buy_price_ore(spot_ore, local_hour)
         sell_ore = sell_price_ore()
-        # Konverter UTC til lokal tid (automatisk sommer/vintertid)
-        utc_offset = get_norwegian_utc_offset(price.timestamp)
-        local_hour = (hour + utc_offset) % 24
         is_night = not (6 <= local_hour < 22)
         sol_lader = solar_kw >= CONFIG.solar_threshold_kw  # Fronius Primo 5kW, terskel 0.5kW
 
         # --- UTLAD: Spotpris er høy → bruk batteri istedenfor dyr gridstrøm ---
-        if should_discharge(spot_ore, hour) and soc > self.min_soc:
+        if should_discharge(spot_ore, local_hour) and soc > self.min_soc:
             avail_kwh = max(0, self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve)
             if avail_kwh > 0:
                 power = min(self.max_discharge, avail_kwh)
@@ -259,7 +251,7 @@ class Optimizer:
 
         # --- LAD FRA NETT: Kun om natten + spotpris er lav ---
         # Om dagen: la sol lade gratis, spar nett-kostnaden
-        elif should_charge(spot_ore, hour) and soc < self.max_soc:
+        elif should_charge(spot_ore, local_hour) and soc < self.max_soc:
             if is_night:
                 avail_kwh = self.capacity * (self.max_soc - soc) / 100
                 power = min(self.max_charge, avail_kwh)
@@ -286,7 +278,7 @@ class Optimizer:
         plan = self.optimize(prices, soc, solar_kw)
         if plan:
             return plan[0]
-        return Action(timestamp=datetime.now(), action='idle', power_kw=0.0)
+        return Action(timestamp=datetime.now(OSLO_TZ), action='idle', power_kw=0.0)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,12 @@
 """Beregning av reell kjøps- og salgspris for Abelgard.
 
-Basert på Elvia Nettleiepriser 2026 og Kraftriket (kraftriket.no):
+Basert på Føie AS Nettleiepriser 2026 (Ringerike/Hole/Nore) og Kraftriket (kraftriket.no):
 
-KJØP (per kWh inkl mva):
+KJØP (per kWh inkl mva) — Føie AS faktura apr 2026:
   Spotpris           (variabel, eks mva)
   + Kraftriket påslag   6.50 øre  eks mva
-  + Energiledd dag     16.50 øre  eks mva (06:00-22:00)  → 30.79 øre inkl mva
-  + Energiledd natt    10.00 øre  eks mva (22:00-06:00)  → 22.88 øre inkl mva
+  + Energiledd dag     16.50 øre  eks mva (06:00-22:00)  → 20.63 øre inkl mva
+  + Energiledd natt    10.00 øre  eks mva (22:00-06:00)  → 12.50 øre inkl mva
   + Forbruksavgift      7.13 øre  eks mva (→ 8.91 inkl mva)
   + Enova               1.00 øre  eks mva (→ 1.25 inkl mva)
   × 1.25 (25% mva)
@@ -18,7 +18,7 @@ SALG som plusskunde (ingen mva):
   Nettselskap betaler -6.25 øre/kWh for produsert energi
   → Netto salgspris: 75.00 - 6.25 = 68.75 øre/kWh
 
-KAPASITETSLEDD (Elvia 2026) — kW-basert, inkl MVA:
+KAPASITETSLEDD (Føie AS 2026) — kW-basert, inkl MVA:
   Trinn 1:  0– 1.99 kW =  237.5 kr/mnd
   Trinn 2:  2– 4.99 kW =  293.8 kr/mnd
   Trinn 3:  5– 9.99 kW =  418.8 kr/mnd  ← MÅL: hold her
@@ -28,6 +28,7 @@ KAPASITETSLEDD (Elvia 2026) — kW-basert, inkl MVA:
   Trinn 7: 25–49.99 kW = 1437.5 kr/mnd
 
   Beregning: Snitt av de 3 høyeste timer på ULIKE dager per mnd.
+  Faktisk trinn apr 2026: 10-15 kW (avregnet 12.09 kW) = 662.5 kr/mnd
   Peak-shaving-grense: 9.5 kW (0.5 kW buffer til 10 kW-trinnet)
   Besparelse Trinn 3→4: 662.5 - 418.8 = 243.7 kr/mnd
 """
@@ -36,16 +37,16 @@ from datetime import datetime
 from typing import List, Tuple
 from config import CONFIG
 
-# Konstanter — Elvia 2026 + Kraftriket (alle eks mva)
+# Konstanter — Føie AS 2026 + Kraftriket (alle eks mva)
 SUPPLIER_MARKUP_ORE  = float(os.getenv("SUPPLIER_MARKUP_ORE",   "6.50"))
-GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva → 30.79 inkl
-GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva → 22.88 inkl
-CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # Elvia 2026
-ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # Elvia 2026
+GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva (Føie AS: 20.63 øre inkl mva / 1.25 = 16.504)
+GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 øre inkl mva / 1.25 = 10.00)
+CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # eks mva (8.91 inkl mva)
+ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # eks mva (1.25 inkl mva)
 NORGES_PRICE_ORE     = float(os.getenv("NORGES_PRICE_ORE",      "96.53"))  # Statlig støtte, ingen mva
-CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "418.80"))  # Trinn 3 (5-9.99kW) inkl MVA
+CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))  # Trinn 4 (10-15kW) inkl MVA — faktisk trinn apr 2026
 SELL_PRICE_ORE       = float(os.getenv("SELL_PRICE_ORE",        "75.00"))  # Kraftriket betaler eks mva
-NET_SELL_BACK_ORE    = float(os.getenv("NET_SELL_BACK_ORE",      "6.25"))  # Nettselskap betaler tilbake
+NET_SELL_BACK_ORE    = float(os.getenv("NET_SELL_BACK_ORE",      "6.25"))  # Føie AS tilbakebetaling produsert energi
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 

@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from dataclasses import dataclass
 from typing import List, Optional
-from config import CONFIG
+from config import CONFIG, OSLO_TZ
 
 
 @dataclass
@@ -65,7 +65,7 @@ class ProfitTracker:
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             "INSERT INTO trades (timestamp, action, energy_kwh, price_nok_kwh, net_profit_nok) VALUES (?, ?, ?, ?, ?)",
-            (datetime.now().isoformat(), action, energy_kwh, price_nok_kwh, net_profit)
+            (datetime.now(OSLO_TZ).isoformat(), action, energy_kwh, price_nok_kwh, net_profit)
         )
         conn.commit()
         conn.close()
@@ -73,7 +73,7 @@ class ProfitTracker:
 
     def get_today_trades(self) -> List[Trade]:
         """Get all trades for today."""
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(OSLO_TZ).strftime("%Y-%m-%d")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
             "SELECT timestamp, action, energy_kwh, price_nok_kwh, net_profit_nok FROM trades WHERE date(timestamp) = ?",
@@ -102,7 +102,7 @@ class ProfitTracker:
         conn = sqlite3.connect(self.db_path)
         
         # Today
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now(OSLO_TZ).strftime("%Y-%m-%d")
         cursor = conn.execute(
             "SELECT action, SUM(energy_kwh), SUM(net_profit_nok) FROM trades WHERE date(timestamp) = ? GROUP BY action",
             (today,)

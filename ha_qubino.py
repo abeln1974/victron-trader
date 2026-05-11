@@ -159,6 +159,197 @@ class QubinoReader:
         return self.get_grid_power() is not None
 
 
+class EVCSController:
+    """
+    Styrer EVCS elbil-lader via Home Assistant for å koordinere med batteri-trading.
+
+    Prioriteter:
+    1. Aldri overskrid peak_limit_kw totalt (batteri + EVCS + annet forbruk)
+    2. Under batteri-eksport (salg): stopp EVCS helt
+    3. Om dagen med sol-overskudd: lad bil med overskuddsstrøm
+    4. Om natten: del tilgjengelig kapasitet mellom batteri og EVCS
+
+    EVCS sitter på AC-input (grid-siden) og teller mot kapasitetsleddet.
+    """
+
+    def __init__(self):
+        from config import CONFIG
+        self.ha_url   = os.getenv("HA_URL", "https://homeassistant.abelgaard.no")
+        self.ha_token = os.getenv("HA_TOKEN", "")
+        self._session = requests.Session()
+        self._session.headers.update({
+            "Authorization": f"Bearer {self.ha_token}",
+            "Content-Type": "application/json",
+        })
+        self._prefix  = CONFIG.evcs_entity_prefix
+        self._min_a   = CONFIG.evcs_min_current_a   # 6A
+        self._max_a   = CONFIG.evcs_max_current_a   # 16A
+        self._phases  = CONFIG.evcs_phases           # 3
+        self._peak_kw = CONFIG.peak_limit_kw         # 9.5 kW
+        self._cache: dict = {}
+        self._last_fetch = 0.0
+        self._last_current_a: int = 0  # Siste satte strøm
+
+    # ------------------------------------------------------------------ #
+    # HA-kall                                                              #
+    # ------------------------------------------------------------------ #
+
+    def _fetch(self) -> bool:
+        """Hent EVCS-states fra HA (maks hvert 10s)."""
+        import time
+        if time.monotonic() - self._last_fetch < 10:
+            return True
+        wanted = {
+            f"binary_sensor.{self._prefix}_connected",
+            f"sensor.{self._prefix}_power",
+            f"sensor.{self._prefix}_current",
+            f"sensor.{self._prefix}_status",
+            f"select.{self._prefix}_mode",
+            f"switch.{self._prefix}_ev_charging",
+            f"number.{self._prefix}_charge_current_setpoint",
+        }
+        try:
+            r = self._session.get(f"{self.ha_url}/api/states", timeout=3)
+            if r.status_code == 200:
+                self._cache = {s["entity_id"]: s["state"]
+                               for s in r.json() if s["entity_id"] in wanted}
+                self._last_fetch = __import__("time").monotonic()
+                return True
+        except Exception as e:
+            logger.debug(f"EVCS fetch feil: {e}")
+        return False
+
+    def _state(self, suffix: str) -> str:
+        return self._cache.get(f"{suffix.split('.')[0]}.{self._prefix}_{suffix.split('_',1)[-1]}"
+                               if '.' not in suffix else suffix, "unknown")
+
+    def _call(self, domain: str, service: str, data: dict) -> bool:
+        try:
+            r = self._session.post(
+                f"{self.ha_url}/api/services/{domain}/{service}",
+                json=data, timeout=5)
+            return r.status_code in (200, 201)
+        except Exception as e:
+            logger.warning(f"EVCS HA-kall feil {domain}/{service}: {e}")
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Status                                                               #
+    # ------------------------------------------------------------------ #
+
+    def is_connected(self) -> bool:
+        self._fetch()
+        return self._cache.get(f"binary_sensor.{self._prefix}_connected") == "on"
+
+    def get_power_kw(self) -> float:
+        self._fetch()
+        try:
+            return float(self._cache.get(f"sensor.{self._prefix}_power", 0)) / 1000
+        except (ValueError, TypeError):
+            return 0.0
+
+    # ------------------------------------------------------------------ #
+    # Styring                                                              #
+    # ------------------------------------------------------------------ #
+
+    def stop_charging(self) -> bool:
+        """Stopp lading helt — brukes når vi selger fra batteri."""
+        if not self.is_connected():
+            return True
+        logger.info("EVCS: stopper elbillading (batteri selger)")
+        ok = self._call("switch", "turn_off",
+                        {"entity_id": f"switch.{self._prefix}_ev_charging"})
+        self._last_current_a = 0
+        return ok
+
+    def set_charge_current(self, amps: int) -> bool:
+        """Sett ladestrøm i Ampere (6-max_a). 0 = stopp."""
+        if not self.is_connected():
+            return True
+        if amps <= 0:
+            return self.stop_charging()
+        amps = max(self._min_a, min(self._max_a, amps))
+        if amps == self._last_current_a:
+            return True  # Ingen endring
+        logger.info(f"EVCS: setter ladestrøm {amps}A "
+                    f"({amps * self._phases * 0.23:.1f} kW approx)")
+        ok1 = self._call("number", "set_value", {
+            "entity_id": f"number.{self._prefix}_charge_current_setpoint",
+            "value": amps})
+        ok2 = self._call("switch", "turn_on",
+                         {"entity_id": f"switch.{self._prefix}_ev_charging"})
+        if ok1 and ok2:
+            self._last_current_a = amps
+        return ok1 and ok2
+
+    def restore_auto(self) -> bool:
+        """Sett EVCS tilbake til auto-modus."""
+        if not self.is_connected():
+            return True
+        logger.info("EVCS: tilbake til auto-modus")
+        ok = self._call("select", "select_option", {
+            "entity_id": f"select.{self._prefix}_mode",
+            "option": "auto"})
+        self._last_current_a = 0
+        return ok
+
+    # ------------------------------------------------------------------ #
+    # Koordinering med batteri og peak-limit                              #
+    # ------------------------------------------------------------------ #
+
+    def adjust_for_trading(self, battery_action: str, grid_kw: float,
+                           solar_kw: float, battery_kw: float) -> None:
+        """
+        Juster EVCS-ladestrøm basert på nåværende situasjon.
+
+        battery_action: 'discharge', 'charge', 'idle'
+        grid_kw:        Nåværende grid-import (positiv=import, negativ=eksport)
+        solar_kw:       Sol-produksjon (kW)
+        battery_kw:     Batterieffekt (positiv=lading, negativ=utlading)
+        """
+        if not self.is_connected():
+            return
+
+        # --- Scenario 1: Batteri selger → stopp EVCS helt ---
+        if battery_action == 'discharge':
+            self.stop_charging()
+            return
+
+        # --- Beregn tilgjengelig kapasitet for EVCS ---
+        # Peak-limit minus nåværende forbruk eks EVCS
+        evcs_kw = self.get_power_kw()
+        other_load_kw = grid_kw - evcs_kw + abs(min(battery_kw, 0))  # Forbruk uten EVCS
+        available_kw = self._peak_kw - other_load_kw
+
+        # Trekk fra batteriladingen hvis den går nå
+        if battery_action == 'charge':
+            available_kw -= abs(battery_kw)
+
+        # --- Scenario 2: Sol-overskudd om dagen → lad med overskudd ---
+        hour = __import__("datetime").datetime.now(
+            __import__("zoneinfo").ZoneInfo("Europe/Oslo")).hour
+        is_day = 6 <= hour < 22
+        if is_day and solar_kw > 0.5:
+            # Overskudd = sol - annet forbruk (ikke EVCS)
+            surplus_kw = solar_kw - (other_load_kw - evcs_kw)
+            charge_kw = max(0, min(surplus_kw, available_kw,
+                                   self._max_a * self._phases * 0.23))
+            amps = int(charge_kw * 1000 / (self._phases * 230))
+            if amps >= self._min_a:
+                self.set_charge_current(amps)
+            else:
+                self.stop_charging()  # Ikke nok sol
+            return
+
+        # --- Scenario 3: Natt eller idle → gi EVCS tilgjengelig kapasitet ---
+        charge_kw = max(0, min(available_kw, self._max_a * self._phases * 0.23))
+        amps = int(charge_kw * 1000 / (self._phases * 230))
+        if amps >= self._min_a:
+            self.set_charge_current(amps)
+        else:
+            logger.debug(f"EVCS: ikke nok kapasitet ({available_kw:.1f}kW ledig)")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     q = QubinoReader()

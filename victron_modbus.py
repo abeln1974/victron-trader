@@ -32,6 +32,7 @@ SIKKERHET:
 - Sett setpoint=0 for å gi kontroll tilbake til ESS
 """
 import os
+import time
 import logging
 from typing import Optional
 from pymodbus.client import ModbusTcpClient
@@ -203,6 +204,7 @@ class VictronModbus:
                         logger.error("Kunne ikke sette Hub4Mode=3")
                         return False
                     logger.info("Bytter Hub4Mode → 3 (ESS Control Disabled)")
+                    time.sleep(0.5)  # GX trenger litt tid på å aktivere Mode 3
                 return True
             else:
                 logger.error("Kunne ikke lese Hub4Mode")
@@ -220,23 +222,10 @@ class VictronModbus:
         return self.set_grid_setpoint(watts)
 
     def set_discharge_power(self, discharge_kw: float) -> bool:
-        """Sett utladefart i kW. Bytter til Mode 4 (External Control) automatisk."""
-        # Sikre ekstern kontroll og verifiser
+        """Sett utladefart i kW. Sikrer Hub4Mode=3 før setpoint skrives."""
         if not self._ensure_external_control():
             logger.warning("Kunne ikke sikre ekstern kontroll for discharge")
             return False
-        
-        # Verifiser Hub4Mode=3 før setpoint
-        try:
-            r = self.client.read_holding_registers(
-                address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
-            if r.isError() or r.registers[0] != self.HUB4_MODE_DISABLED:
-                logger.warning("Hub4Mode ikke 3 før discharge setpoint")
-                return False
-        except Exception:
-            logger.warning("Kunne ikke verifisere Hub4Mode før discharge")
-            return False
-        
         watts = -int(discharge_kw * 1000)
         return self.set_grid_setpoint(watts)
 

@@ -3,7 +3,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import List, Optional
-from config import CONFIG
+from config import CONFIG, OSLO_TZ
 
 
 @dataclass
@@ -42,7 +42,7 @@ class PriceFetcher:
     def _parse_hvakoster(self, data: list) -> List[PricePoint]:
         points = []
         for item in data:
-            ts  = datetime.fromisoformat(item["time_start"].replace("Z", "+00:00"))
+            ts  = datetime.fromisoformat(item["time_start"].replace("Z", "+00:00")).astimezone(OSLO_TZ)
             ore = item["NOK_per_kWh"] * 100
             nok = item["NOK_per_kWh"] * CONFIG.vat
             points.append(PricePoint(timestamp=ts, price_ore_kwh=ore, price_nok_kwh=nok))
@@ -72,7 +72,7 @@ class PriceFetcher:
             ts_str = entry.get("deliveryStart") or entry.get("deliveryPeriod", {}).get("start", "")
             if not ts_str:
                 continue
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00")).astimezone(OSLO_TZ)
             # Nordpool returnerer NOK/MWh → konverter til øre/kWh
             area_prices = entry.get("entryPerArea", {})
             price_mwh = area_prices.get(self.price_area, 0)
@@ -83,8 +83,7 @@ class PriceFetcher:
 
     def get_prices(self, hours: int = 24) -> List[PricePoint]:
         """Get prices for next N hours (today + tomorrow if available)."""
-        # Bruk timezone-aware datetime (priser fra API er UTC)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(OSLO_TZ)
         today = now.date()
         tomorrow = today + timedelta(days=1)
 
@@ -103,10 +102,10 @@ class PriceFetcher:
 
     def get_current_price(self) -> Optional[PricePoint]:
         """Get price for current hour."""
-        prices = self._fetch_day(datetime.now().year, datetime.now().month, datetime.now().day)
-        now = datetime.now()
+        now_oslo = datetime.now(OSLO_TZ)
+        prices = self._fetch_day(now_oslo.year, now_oslo.month, now_oslo.day)
         for p in prices:
-            if p.timestamp.hour == now.hour:
+            if p.timestamp.hour == now_oslo.hour:
                 return p
         return None
 
@@ -115,4 +114,4 @@ if __name__ == "__main__":
     pf = PriceFetcher()
     prices = pf.get_prices(48)
     for p in prices[:5]:
-        print(f"{p.timestamp.strftime('%H:%M')}: {p.price_ore_kwh:.1f} øre ({p.price_nok_kwh:.3f} kr)")
+        print(f"{p.timestamp.strftime('%H:%M %Z')}: {p.price_ore_kwh:.1f} øre ({p.price_nok_kwh:.3f} kr)")

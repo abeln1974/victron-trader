@@ -7,8 +7,8 @@ from flask import Flask, jsonify, render_template_string
 
 from profit_tracker import ProfitTracker
 from price_fetcher import PriceFetcher
-from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK
-from config import CONFIG
+from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK, GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE, SUPPLIER_MARKUP_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, is_day_tariff
+from config import CONFIG, OSLO_TZ
 
 app = Flask(__name__)
 tracker = ProfitTracker()
@@ -67,7 +67,7 @@ def _poll_cerbo():
                         "grid_source": grid_src,
                         "solar_w": solar_w,
                         "battery_w": bat_raw,
-                        "updated": datetime.now().isoformat(),
+                        "updated": datetime.now(OSLO_TZ).isoformat(),
                         "error": None
                     })
         except Exception as e:
@@ -83,7 +83,7 @@ if os.getenv("VICTRON_HOST"):
 
 def get_prices_cached():
     with _price_lock:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(OSLO_TZ)
         if not _price_cache["fetched"] or (now - _price_cache["fetched"]).seconds > 1800:
             try:
                 _price_cache["data"] = fetcher.get_prices(24)
@@ -100,16 +100,21 @@ def api_status():
     stats = tracker.get_stats()
 
     spot_ore = current.price_ore_kwh / CONFIG.vat if current else 0
-    buy_ore = buy_price_ore(spot_ore, datetime.now().hour) if current else 0
+    hour_now = datetime.now(OSLO_TZ).hour
+    buy_ore = buy_price_ore(spot_ore, hour_now) if current else 0
     sell_ore = sell_price_ore()
+    grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour_now) else GRID_TARIFF_NIGHT_ORE
+    raw_buy_ore = (spot_ore + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * CONFIG.vat if current else 0
+    discharge_margin = round(raw_buy_ore - sell_ore, 1)
 
     return jsonify({
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(OSLO_TZ).isoformat(),
         "price": {
             "spot_ore": round(spot_ore, 1),
             "buy_ore": round(buy_ore, 1),
             "sell_ore": round(sell_ore, 2),
             "margin_ore": round(sell_ore - buy_ore, 1),
+            "discharge_margin_ore": discharge_margin,
         },
         "profit": {
             "today_nok": round(stats.get("today_profit_nok", 0), 2),
@@ -128,7 +133,7 @@ def api_prices():
     return jsonify([{
         "time": p.timestamp.strftime("%H:%M"),
         "spot_ore": round(p.price_ore_kwh / CONFIG.vat, 1),
-        "buy_ore": round(buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour), 1),
+        "buy_ore": round(buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour), 1),
         "sell_ore": round(sell_price_ore(), 2),
     } for p in prices])
 
@@ -156,7 +161,7 @@ def api_plan():
     current_soc = _live_cache.get("soc", 70.0)  # Bruk reell SOC fra cache
     plan = opt.optimize(prices, current_soc=current_soc)
     return jsonify([{
-        "time": a.timestamp.strftime("%H:%M"),
+        "time": a.timestamp.astimezone(OSLO_TZ).strftime("%H:%M"),
         "action": a.action,
         "power_kw": round(a.power_kw, 1),
         "reason": a.reason,
@@ -252,7 +257,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div>⚡</div>
   <div>
     <h1>Abelgård Energihandel</h1>
-    <span>Kraftriket Solstrøm · Elvia NO1 · 48 kWh Farco</span>
+    <span>Kraftriket Solstrøm · Føie AS NO1 · 50 kWh NMC</span>
   </div>
   <div class="live-dot" title="Live oppdatering hvert 10s"></div>
 </header>
@@ -270,7 +275,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div class="card">
       <div class="card-title">Reell kjøpspris</div>
       <div class="card-value" id="buyOre">—</div>
-      <div class="card-sub">øre/kWh inkl alt + Norgespris</div>
+      <div class="card-sub" id="buyOreSub">øre/kWh inkl alt + Norgespris</div>
     </div>
     <div class="card">
       <div class="card-title">Salgspris (plusskunde)</div>
@@ -278,7 +283,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="card-sub">øre/kWh (Kraftriket netto)</div>
     </div>
     <div class="card">
-      <div class="card-title">Margin</div>
+      <div class="card-title">Utlade-margin</div>
       <div class="card-value" id="marginOre">—</div>
       <div class="card-sub" id="marginStatus">—</div>
     </div>
@@ -383,18 +388,22 @@ async function fetchStatus() {
 
   document.getElementById('spotOre').textContent = d.price.spot_ore + ' øre';
   document.getElementById('buyOre').textContent = d.price.buy_ore + ' øre';
+  const rawBuy = (d.price.discharge_margin_ore + d.price.sell_ore).toFixed(1);
+  document.getElementById('buyOreSub').textContent = `øre inkl alt − Norgespris (uten støtte: ${rawBuy}ø)`;
 
   const sellEl = document.getElementById('sellOre');
   sellEl.textContent = d.price.sell_ore + ' øre';
 
-  const margin = d.price.margin_ore;
+  const margin = d.price.discharge_margin_ore;
   const marginEl = document.getElementById('marginOre');
   const marginStatus = document.getElementById('marginStatus');
   marginEl.textContent = (margin >= 0 ? '+' : '') + margin + ' øre';
-  marginEl.className = 'card-value ' + (margin >= 0 ? 'green' : 'red');
+  marginEl.className = 'card-value ' + (margin >= 10 ? 'green' : margin >= 0 ? 'yellow' : 'red');
 
-  if (margin >= 0) {
+  if (margin >= 10) {
     marginStatus.innerHTML = '<span class="badge badge-green">⚡ Lønnsomt å utlade</span>';
+  } else if (margin >= 0) {
+    marginStatus.innerHTML = '<span class="badge badge-yellow">⚠ Marginal</span>';
   } else {
     marginStatus.innerHTML = '<span class="badge badge-blue">🔋 Lønnsomt å lade</span>';
   }
@@ -404,11 +413,14 @@ async function fetchStatus() {
   document.getElementById('todayBought').textContent = d.profit.today_bought_kwh + ' kWh';
   document.getElementById('todaySold').textContent = d.profit.today_sold_kwh + ' kWh';
 
+  const dm = d.price.discharge_margin_ore;
+  const dmColor = dm >= 10 ? '#22c55e' : dm >= 0 ? '#facc15' : '#ef4444';
   document.getElementById('statusBar').innerHTML =
     `<strong>Status:</strong> Live &nbsp;|&nbsp;
      <strong>Spot:</strong> ${d.price.spot_ore} øre &nbsp;|&nbsp;
-     <strong>Kjøp:</strong> ${d.price.buy_ore} øre &nbsp;|&nbsp;
+     <strong>Kjøp (reell):</strong> ${d.price.buy_ore} øre &nbsp;|&nbsp;
      <strong>Salg:</strong> ${d.price.sell_ore} øre &nbsp;|&nbsp;
+     <strong>Utlade-margin:</strong> <span style="color:${dmColor}">${dm >= 0 ? '+' : ''}${dm} øre</span> &nbsp;|&nbsp;
      <strong>Kapasitetsledd:</strong> ${d.capacity_charge_nok} kr/mnd`;
 
   document.getElementById('lastUpdate').textContent =
@@ -483,7 +495,10 @@ async function fetchTrades() {
   tbody.innerHTML = trades.map(t => {
     const typeClass = t.trade_type === 'sell' ? 'orange' : t.trade_type === 'peak_shave' ? 'yellow' : 'blue';
     const typeLabel = t.trade_type === 'sell' ? '⚡ Solgt' : t.trade_type === 'peak_shave' ? '🔒 Peak' : '🔋 Kjøpt';
-    const price = t.price_nok_kwh > 0 ? (t.price_nok_kwh * 100).toFixed(0) + 'ø' : '—';
+    const priceOre = t.price_nok_kwh > 0 ? (t.price_nok_kwh * 100).toFixed(0) + 'ø spot' : '—';
+    const price = t.net_profit_nok && t.energy_kwh > 0
+      ? (Math.abs(t.net_profit_nok) / t.energy_kwh * 100).toFixed(1) + 'ø netto'
+      : priceOre;
     return `<tr>
       <td style="color:#64748b">${t.timestamp ? t.timestamp.substring(11,16) : '—'}</td>
       <td><span class="${typeClass}">${typeLabel}</span></td>
