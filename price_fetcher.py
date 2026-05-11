@@ -1,4 +1,4 @@
-"""Henter spotpriser fra hvakosterstrommen.no API."""
+"""Henter spotpriser fra hvakosterstrommen.no (primær) med Nordpool direkte som fallback."""
 import requests
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
@@ -14,28 +14,72 @@ class PricePoint:
 
 
 class PriceFetcher:
-    BASE_URL = "https://www.hvakosterstrommen.no/api/v1/prices"
+    PRIMARY_URL  = "https://www.hvakosterstrommen.no/api/v1/prices"
+    # Nordpool offisielt day-ahead API (ingen auth nødvendig for day-ahead)
+    NORDPOOL_URL = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
 
     def __init__(self, price_area: str = CONFIG.price_area):
         self.price_area = price_area
 
     def _fetch_day(self, year: int, month: int, day: int) -> List[PricePoint]:
-        """Fetch prices for a single day."""
-        url = f"{self.BASE_URL}/{year}/{month:02d}-{day:02d}_{self.price_area}.json"
+        """Fetch prices - prøv hvakosterstrommen.no først, Nordpool direkte som fallback."""
+        try:
+            return self._fetch_hvakoster(year, month, day)
+        except RuntimeError:
+            return self._fetch_nordpool(year, month, day)
+
+    def _fetch_hvakoster(self, year: int, month: int, day: int) -> List[PricePoint]:
+        """Primær: hvakosterstrommen.no (enkel proxy for Nordpool)."""
+        url = f"{self.PRIMARY_URL}/{year}/{month:02d}-{day:02d}_{self.price_area}.json"
         try:
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
-
-            points = []
-            for item in data:
-                ts = datetime.fromisoformat(item["time_start"].replace("Z", "+00:00"))
-                ore = item["NOK_per_kWh"] * 100  # Convert to øre
-                nok = item["NOK_per_kWh"] * CONFIG.vat
-                points.append(PricePoint(timestamp=ts, price_ore_kwh=ore, price_nok_kwh=nok))
-            return points
+            return self._parse_hvakoster(data)
         except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch prices: {e}")
+            raise RuntimeError(f"hvakosterstrommen.no feilet: {e}")
+
+    def _parse_hvakoster(self, data: list) -> List[PricePoint]:
+        points = []
+        for item in data:
+            ts  = datetime.fromisoformat(item["time_start"].replace("Z", "+00:00"))
+            ore = item["NOK_per_kWh"] * 100
+            nok = item["NOK_per_kWh"] * CONFIG.vat
+            points.append(PricePoint(timestamp=ts, price_ore_kwh=ore, price_nok_kwh=nok))
+        return points
+
+    def _fetch_nordpool(self, year: int, month: int, day: int) -> List[PricePoint]:
+        """Fallback: Nordpool offisielt day-ahead API."""
+        date_str = f"{year}-{month:02d}-{day:02d}"
+        params = {
+            "market": "DayAhead",
+            "deliveryArea": self.price_area,
+            "currency": "NOK",
+            "date": date_str,
+        }
+        try:
+            resp = requests.get(self.NORDPOOL_URL, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            return self._parse_nordpool(data)
+        except requests.RequestException as e:
+            raise RuntimeError(f"Nordpool API feilet: {e}")
+
+    def _parse_nordpool(self, data: dict) -> List[PricePoint]:
+        """Parse Nordpool day-ahead API respons."""
+        points = []
+        for entry in data.get("multiAreaEntries", []):
+            ts_str = entry.get("deliveryStart") or entry.get("deliveryPeriod", {}).get("start", "")
+            if not ts_str:
+                continue
+            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            # Nordpool returnerer NOK/MWh → konverter til øre/kWh
+            area_prices = entry.get("entryPerArea", {})
+            price_mwh = area_prices.get(self.price_area, 0)
+            ore = price_mwh / 10   # MWh → kWh → øre
+            nok = ore / 100 * CONFIG.vat
+            points.append(PricePoint(timestamp=ts, price_ore_kwh=ore, price_nok_kwh=nok))
+        return points
 
     def get_prices(self, hours: int = 24) -> List[PricePoint]:
         """Get prices for next N hours (today + tomorrow if available)."""
