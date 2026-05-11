@@ -27,7 +27,7 @@ class EnergyTrader:
         self.price_fetcher = PriceFetcher()
         self.optimizer = Optimizer()
         self.victron = VictronModbus()
-        self.qubino = QubinoReader()   # Primærkilde grid (alle 3 faser, IT-nett)
+        self.qubino  = QubinoReader()   # Primærkilde grid total (inkl L3, via _w_6)
         self.tracker = ProfitTracker()
         self.running = False
         self.current_action: Optional[Action] = None
@@ -124,14 +124,14 @@ class EnergyTrader:
 
     def _get_grid_power(self) -> Optional[float]:
         """
-        Hent grid-effekt med Qubino som primærkilde (L1+L2+L3 korrekt i IT-nett).
-        Fallback til VM-3P75CT via Modbus (L1+L2 — mangler L3).
+        Hent total grid-effekt.
+        Primær: Qubino _w_6 (alle 3 faser, IT-nett korrekt).
+        Fallback: VM-3P75CT Modbus (L1+L2, mangler L3).
         """
         qpower = self.qubino.get_grid_power()
         if qpower:
             return qpower["total"]
-        # Fallback: VM-3P75CT via Modbus (L1+L2 kun)
-        logger.debug("Qubino utilgjengelig — bruker VM-3P75CT fallback (L1+L2)")
+        logger.debug("Qubino utilgjengelig — fallback til VM-3P75CT (L1+L2)")
         return self.victron.get_grid_power()
 
     def _check_peak_shaving(self):

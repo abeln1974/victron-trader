@@ -1,11 +1,19 @@
 """
-Henter Qubino 3-fase smartmåler data fra Home Assistant REST API.
+Qubino 3-fase smartmåler via Home Assistant REST API.
 
-Qubino ZMNHXD via Z-Wave — måler alle 3 faser korrekt i IT-nett.
-Brukes som primærkilde for grid-effekt, med VM-3P75CT (Modbus) som fallback.
+Qubino ZMNHXD måler HUSFORBRUK (last-siden), IKKE grid-import/-eksport.
+Viktig: Qubino er ikke grid-måleren — den måler forbruk på husinstallasjonens
+bussbjelke, og inkluderer Fronius-produksjon på en måte som gjør verdiene
+vanskeleg å bruke direkte som grid-måling.
 
-Entity-navnene er basert på HA device "Qubino 3-Phase Smart Meter Node".
-Juster HA_ENTITY_* hvis navnene avviker i din installasjon.
+Grid-måler: VM-3P75CT via Victron Modbus-TCP (device_id=41/100)
+  - L1 og L2 måles korrekt
+  - L3 = 0W (kjent begrensning i IT-nett med VM-3P75CT)
+
+QubinoReader kan brukes til:
+  - Husforbruk totalt
+  - Fasefordeling av forbruk
+  - Fremtidig: kompensere manglende L3 i grid-målingen
 """
 import os
 import logging
@@ -19,11 +27,12 @@ _HA_URL_DEFAULT   = "https://homeassistant.abelgaard.no"
 _HA_TOKEN_DEFAULT = ""
 
 # Entity-IDs verifisert mot HA 2026-05-11 (Qubino ZMNHXD, Z-Wave)
-# Forbruk (positiv = inn fra nett, negativ = eksport til nett)
+# _w_6 = total alle 3 faser (consumption), verifisert = VM-3P75CT L1+L2 + manglende L3
 HA_ENTITIES = {
-    "power_l1":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_6",    # L1: ~888W
-    "power_l2":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_2_2",  # L2: ~-1W
-    "power_l3":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_3_2",  # L3: ~909W
+    "power_total": "sensor.qubino_3_phase_smart_meter_electric_consumption_w_6",    # Total L1+L2+L3
+    "power_l1":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_2_2",  # L1
+    "power_l2":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_3_2",  # L2
+    "power_l3":   "sensor.qubino_3_phase_smart_meter_electric_consumption_w_4_2",  # L3 ✅
     "voltage_l1": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_2",    # ~143V
     "voltage_l2": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_3_2",  # ~142V
     "voltage_l3": "sensor.qubino_3_phase_smart_meter_electric_consumption_v_4_2",  # ~141V
@@ -124,21 +133,20 @@ class QubinoReader:
             elif status is None:
                 logger.warning("Qubino Z-Wave node: unavailable — forsøker likevel")
 
-        l1 = self._get_state(HA_ENTITIES["power_l1"])
-        l2 = self._get_state(HA_ENTITIES["power_l2"])
-        l3 = self._get_state(HA_ENTITIES["power_l3"])
+        total = self._get_state(HA_ENTITIES["power_total"])
+        l1    = self._get_state(HA_ENTITIES["power_l1"])
+        l2    = self._get_state(HA_ENTITIES["power_l2"])
+        l3    = self._get_state(HA_ENTITIES["power_l3"])
 
-        if l1 is None and l2 is None and l3 is None:
-            logger.warning("Qubino: alle faser utilgjengelig (Z-Wave nede?)")
+        if total is None:
+            logger.warning("Qubino: total utilgjengelig (Z-Wave nede?)")
             return None
 
-        # Erstatt None med 0 for delvis data
         l1 = l1 or 0.0
         l2 = l2 or 0.0
         l3 = l3 or 0.0
-        total = l1 + l2 + l3
 
-        logger.debug(f"Qubino: L1={l1}W L2={l2}W L3={l3}W tot={total}W")
+        logger.debug(f"Qubino: total={total}W  L1={l1}W L2={l2}W L3={l3}W")
         return {"l1": l1, "l2": l2, "l3": l3, "total": total, "source": "qubino"}
 
     def get_voltages(self) -> Optional[Dict]:

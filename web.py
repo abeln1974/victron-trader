@@ -43,19 +43,19 @@ def _poll_cerbo():
                 solar_w = vic.get_solar_power()
                 bat_raw = vic._read_signed16(842)
 
-                # Grid: prøv Qubino først (alle 3 faser), fallback til VM-3P75CT
+                # Grid: Qubino primær (total inkl L3 via _w_6), VM-3P75CT fallback
                 qpower = qubino.get_grid_power()
                 if qpower:
-                    grid_w  = qpower["total"]
-                    grid_l1 = qpower["l1"]
-                    grid_l2 = qpower["l2"]
-                    grid_l3 = qpower["l3"]
+                    grid_w   = qpower["total"]
+                    grid_l1  = qpower["l1"]
+                    grid_l2  = qpower["l2"]
+                    grid_l3  = qpower["l3"]
                     grid_src = "qubino"
                 else:
                     phases  = vic.get_grid_phases()
                     grid_l1 = phases.get("l1")
                     grid_l2 = phases.get("l2")
-                    grid_l3 = 0.0  # VM-3P75CT måler ikke L3 i IT-nett
+                    grid_l3 = 0.0
                     grid_w  = (grid_l1 or 0) + (grid_l2 or 0)
                     grid_src = "modbus"
 
@@ -295,7 +295,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">⚡ Nett (L1+L2 målt)</div>
+      <div class="card-title">⚡ Nett</div>
       <div class="card-value" id="liveGrid">—</div>
       <div class="card-sub" id="liveGridSub" style="line-height:1.6">
         <span id="liveGridDir"></span> <span id="liveGridBadge"></span><br>
@@ -613,8 +613,8 @@ async function fetchLive() {
     const src = d.grid_source || 'modbus';
     const badge = document.getElementById('liveGridBadge');
     badge.innerHTML = src === 'qubino'
-      ? '<span style="font-size:.68rem;background:#14532d;color:#22c55e;padding:.1rem .4rem;border-radius:4px">Qubino ✓</span>'
-      : '<span style="font-size:.68rem;background:#422006;color:#facc15;padding:.1rem .4rem;border-radius:4px">⚠ Modbus fallback (L3=0)</span>';
+      ? '<span style="font-size:.68rem;background:#14532d;color:#22c55e;padding:.1rem .4rem;border-radius:4px">Qubino ✓ (L1+L2+L3)</span>'
+      : '<span style="font-size:.68rem;background:#422006;color:#facc15;padding:.1rem .4rem;border-radius:4px">⚠ Modbus (L3=0)</span>';
     const l1 = d.grid_l1 ?? 0;
     const l2 = d.grid_l2 ?? 0;
     const l3 = d.grid_l3 ?? 0;
