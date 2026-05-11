@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 from price_fetcher import PricePoint, PriceFetcher
+from tariff import buy_price_ore, sell_price_ore, should_charge, should_discharge
 from config import CONFIG
 
 
@@ -26,50 +27,62 @@ class Optimizer:
 
     def optimize(self, prices: List[PricePoint], current_soc: float = 50.0) -> List[Action]:
         """
-        Simple peak-shaving strategy:
-        - Buy when price is in bottom N%
-        - Sell when price is in top N%
+        Strategi basert på reelle kjøps- og salgspriser (Kraftriket/Elvia):
+        - Lad når innkjøpspris er lav nok til at vi tjener på å selge senere
+        - Utlad når spotpris er over salgspris (75 øre) - vi sparer å kjøpe dyr strøm
         """
         if not prices:
             return []
 
-        sorted_prices = sorted(prices, key=lambda p: p.price_nok_kwh)
-        n = len(sorted_prices)
-        
-        # Define thresholds (bottom 30% charge, top 30% discharge)
-        charge_threshold = sorted_prices[int(n * 0.3)].price_nok_kwh
-        discharge_threshold = sorted_prices[int(n * 0.7)].price_nok_kwh
-
         actions = []
+        soc = current_soc
+
         for p in prices:
-            action = self._decide_action(p, current_soc, charge_threshold, discharge_threshold)
+            spot_ore = p.price_ore_kwh / CONFIG.vat  # Konverter tilbake til eks mva
+            hour = p.timestamp.hour
+            action = self._decide_action_tariff(p, soc, spot_ore, hour)
             actions.append(action)
-            
-            # Simulate SOC change for planning (rough estimate)
+
+            # Simuler SOC-endring for planlegging
+            kwh_change = abs(action.power_kw)  # Per time
             if action.action == 'charge':
-                current_soc = min(current_soc + 10, self.max_soc)
+                soc_change = (kwh_change * self.efficiency / self.capacity) * 100
+                soc = min(soc + soc_change, self.max_soc)
             elif action.action == 'discharge':
-                current_soc = max(current_soc - 10, self.min_soc)
+                soc_change = (kwh_change / self.efficiency / self.capacity) * 100
+                soc = max(soc - soc_change, self.min_soc)
 
         return actions
 
-    def _decide_action(self, price: PricePoint, soc: float, 
-                       charge_thresh: float, discharge_thresh: float) -> Action:
-        """Decide action for a single price point."""
-        if price.price_nok_kwh <= charge_thresh and soc < self.max_soc:
-            # Buy/charge
-            power = min(self.max_charge, self.capacity * (self.max_soc - soc) / 100)
-            cost = power * price.price_nok_kwh
-            return Action(timestamp=price.timestamp, action='charge', 
+    def _decide_action_tariff(self, price: PricePoint, soc: float,
+                               spot_ore: float, hour: int) -> Action:
+        """
+        Beslutning basert på reelle priser.
+        
+        Utlading: Når spotpris > 75 øre (salgspris) sparer vi kjøp fra grid
+        Lading: Når innkjøpspris (inkl alle avgifter) er lav - lagrer billig strøm
+        """
+        buy_ore = buy_price_ore(spot_ore, hour)
+        sell_ore = sell_price_ore()
+
+        # --- UTLAD: Spotpris er høy → bruk batteri istedenfor dyr gridstrøm ---
+        if should_discharge(spot_ore, hour) and soc > self.min_soc:
+            avail_kwh = self.capacity * (soc - self.min_soc) / 100
+            power = min(self.max_discharge, avail_kwh)
+            # Gevinst: vi sparer innkjøpspris (buy_ore), men "ofrer" sell_ore
+            savings_ore = buy_ore - sell_ore  # Spart per kWh ved å ikke kjøpe fra grid
+            profit = power * savings_ore / 100  # kr
+            return Action(timestamp=price.timestamp, action='discharge',
+                         power_kw=-power, expected_profit_nok=profit)
+
+        # --- LAD: Innkjøpspris er lav → fyll batteri for fremtidig bruk ---
+        elif should_charge(spot_ore, hour) and soc < self.max_soc:
+            avail_kwh = self.capacity * (self.max_soc - soc) / 100
+            power = min(self.max_charge, avail_kwh)
+            cost = power * buy_ore / 100  # kr
+            return Action(timestamp=price.timestamp, action='charge',
                          power_kw=power, expected_profit_nok=-cost)
-        
-        elif price.price_nok_kwh >= discharge_thresh and soc > self.min_soc:
-            # Sell/discharge
-            power = -min(self.max_discharge, self.capacity * (soc - self.min_soc) / 100)
-            revenue = abs(power) * price.price_nok_kwh * self.efficiency
-            return Action(timestamp=price.timestamp, action='discharge', 
-                         power_kw=power, expected_profit_nok=revenue)
-        
+
         else:
             return Action(timestamp=price.timestamp, action='idle', power_kw=0.0)
 
