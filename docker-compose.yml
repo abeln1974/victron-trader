@@ -36,6 +36,12 @@ services:
       - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-0.30}
       - FORECAST_HOURS=${FORECAST_HOURS:-24}
       
+      # Home Assistant - Qubino primærkilde grid (alle 3 faser IT-nett)
+      - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
+      - HA_TOKEN=${HA_TOKEN:-}
+      - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
+      - HA_MIN_INTERVAL=${HA_MIN_INTERVAL:-30.0}
+
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     
@@ -80,6 +86,7 @@ services:
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}
       - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
+      - HA_MIN_INTERVAL=${HA_MIN_INTERVAL:-30.0}
       - WEB_PORT=8080
       - DB_PATH=/app/data/profit.db
     volumes:

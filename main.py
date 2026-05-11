@@ -12,6 +12,7 @@ from price_fetcher import PriceFetcher
 from optimizer import Optimizer, Action
 from victron_modbus import VictronModbus
 from profit_tracker import ProfitTracker
+from ha_qubino import QubinoReader
 
 # Setup logging
 logging.basicConfig(
@@ -26,6 +27,7 @@ class EnergyTrader:
         self.price_fetcher = PriceFetcher()
         self.optimizer = Optimizer()
         self.victron = VictronModbus()
+        self.qubino = QubinoReader()   # Primærkilde grid (alle 3 faser, IT-nett)
         self.tracker = ProfitTracker()
         self.running = False
         self.current_action: Optional[Action] = None
@@ -120,10 +122,22 @@ class EnergyTrader:
         except Exception as e:
             logger.exception("Trade cycle failed")
 
+    def _get_grid_power(self) -> Optional[float]:
+        """
+        Hent grid-effekt med Qubino som primærkilde (L1+L2+L3 korrekt i IT-nett).
+        Fallback til VM-3P75CT via Modbus (L1+L2 — mangler L3).
+        """
+        qpower = self.qubino.get_grid_power()
+        if qpower:
+            return qpower["total"]
+        # Fallback: VM-3P75CT via Modbus (L1+L2 kun)
+        logger.debug("Qubino utilgjengelig — bruker VM-3P75CT fallback (L1+L2)")
+        return self.victron.get_grid_power()
+
     def _check_peak_shaving(self):
         """Sjekk om vi må peak-shave basert på nåværende grid-effekt."""
         try:
-            grid_w = self.victron.get_grid_power()
+            grid_w = self._get_grid_power()
             soc = self.victron.get_soc()
             if grid_w is None or soc is None:
                 return
@@ -179,9 +193,10 @@ class EnergyTrader:
 
     def _log_status(self):
         """Log current system status."""
-        soc = self.victron.get_soc()
-        grid = self.victron.get_grid_power()
-        logger.debug(f"Status SOC={soc}% Grid={grid}W")
+        soc  = self.victron.get_soc()
+        grid = self._get_grid_power()
+        solar = self.victron.get_solar_power()
+        logger.info(f"Status: SOC={soc}% Grid={grid}W Sol={solar}W")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""

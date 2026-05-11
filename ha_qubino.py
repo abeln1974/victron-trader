@@ -33,7 +33,8 @@ HA_ENTITIES = {
 # Timeout for HA-kall — Z-Wave kan være treg
 HA_TIMEOUT = float(os.getenv("HA_TIMEOUT", "3.0"))
 # Minimum sekunder mellom kall mot HA (unngå rate-limit/ban)
-HA_MIN_INTERVAL = float(os.getenv("HA_MIN_INTERVAL", "15.0"))
+# 30s matcher Qubino P42=30s (active power rapport-intervall)
+HA_MIN_INTERVAL = float(os.getenv("HA_MIN_INTERVAL", "30.0"))
 
 
 class QubinoReader:
