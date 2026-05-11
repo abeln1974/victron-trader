@@ -71,6 +71,7 @@ class VictronModbus:
     REG_GRID_L2           = 821    # Grid L2 power (W, signed)
     REG_GRID_L3           = 822    # Grid L3 power (W, signed) — 0W på IT-nett!
     REG_PV_POWER          = 808    # AC-coupled PV on AC output L1 (W) - Fronius Primo 5kW
+    REG_BATTERY_POWER     = 842    # Battery Power System (W, signed16, positiv=lading)
 
     # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
     UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS(2716/2902)
