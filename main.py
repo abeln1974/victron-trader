@@ -54,21 +54,26 @@ class EnergyTrader:
             self.stop()
 
     def _main_loop(self):
-        """Run trading logic every hour."""
+        """Run trading logic every hour + peak-shaving every 10 seconds."""
         last_hour = -1
-        
+        last_status_min = -1
+
         while self.running:
             now = datetime.now()
-            
-            # Run at start of each hour
+
+            # Kjør handelslogikk ved start av hver time
             if now.hour != last_hour:
                 last_hour = now.hour
                 self._execute_trade_cycle()
-            
-            # Log status every 5 minutes
-            if now.minute % 5 == 0:
+
+            # Peak-shaving: sjekk grid-effekt hvert 10. sekund
+            self._check_peak_shaving()
+
+            # Log status hvert 5. minutt
+            if now.minute % 5 == 0 and now.minute != last_status_min:
+                last_status_min = now.minute
                 self._log_status()
-            
+
             time.sleep(10)
 
     def _execute_trade_cycle(self):
@@ -109,6 +114,32 @@ class EnergyTrader:
         except Exception as e:
             logger.exception("Trade cycle failed")
 
+    def _check_peak_shaving(self):
+        """Sjekk om vi må peak-shave basert på nåværende grid-effekt."""
+        try:
+            grid_w = self.victron.get_grid_power()
+            soc = self.victron.get_soc()
+            if grid_w is None or soc is None:
+                return
+
+            grid_kw = grid_w / 1000.0
+
+            # Bare peak-shave ved import (positiv = trekker fra nett)
+            if grid_kw <= 0:
+                return
+
+            action = self.optimizer.peak_shave(grid_kw, soc)
+            if action:
+                logger.warning(
+                    f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > "
+                    f"{self.optimizer.peak_limit_kw}kW. "
+                    f"Utlader {abs(action.power_kw):.1f}kW fra batteri."
+                )
+                self.victron.set_discharge_power(abs(action.power_kw))
+                self.tracker.log_trade("peak_shave", abs(action.power_kw), 0)
+        except Exception as e:
+            logger.debug(f"Peak-shave sjekk feilet: {e}")
+
     def _execute_action(self, action: Action, soc: float, price: float):
         """Execute the trading action on Victron."""
         energy_kwh = abs(action.power_kw)  # Approximate for 1 hour
@@ -130,15 +161,15 @@ class EnergyTrader:
                 logger.info("SOC at min, skipping discharge")
                 self.victron.stop_ess_control()
                 return
-            
+
             success = self.victron.set_discharge_power(abs(action.power_kw))
             if success:
                 self.tracker.log_trade("sell", energy_kwh, price)
-                logger.info(f"Discharging {abs(action.power_kw):.1f}kW")
-        
+                logger.info(f"Discharging {abs(action.power_kw):.1f}kW | {action.reason}")
+
         else:
             self.victron.stop_ess_control()
-            logger.info("Idle - letting ESS manage itself")
+            logger.info("Idle - ESS styrer selv")
 
     def _log_status(self):
         """Log current system status."""
