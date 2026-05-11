@@ -9,8 +9,8 @@ KJØP (per kWh inkl mva) — Kraftriket fastpris + Føie AS faktura apr 2026:
   + Forbruksavgift      7.13 øre  eks mva (→ 8.91 inkl mva)
   + Enova               1.00 øre  eks mva (→ 1.25 inkl mva)
   × 1.25 (25% mva)
-  - Norgespris         96.53 øre  INGEN mva (statlig støtte)
   = Total reell innkjøpspris
+  NB: Norgespris-støtten gjelder IKKE — fastpris 40 øre er alltid under 73 øre-grensen
 
 SALG som plusskunde (ingen mva):
   Salgspris = spotpris eks mva (Nordpool NO1, time-for-time)
@@ -41,7 +41,6 @@ GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks 
 GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 øre inkl mva)
 CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # eks mva (8.91 inkl mva)
 ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # eks mva (1.25 inkl mva)
-NORGES_PRICE_ORE     = float(os.getenv("NORGES_PRICE_ORE",      "96.53"))  # Statlig støtte, ingen mva
 CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))  # Trinn 4 (10-15kW) inkl MVA — faktisk trinn apr 2026
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
@@ -70,19 +69,15 @@ def is_day_tariff(hour: int) -> bool:
 
 def buy_price_ore(spot_ore: float, hour: int) -> float:
     """
-    Beregn total reell innkjøpspris i øre/kWh inkl mva og etter Norgespris-støtte.
+    Beregn total reell innkjøpspris i øre/kWh inkl mva.
 
-    Kraftriket fastpris (40 øre eks mva) + nettleie + avgifter × mva − Norgespris.
-    spot_ore er IKKE brukt i kjøpsberegningen (fastprisavtale).
+    Kraftriket fastpris (40 øre eks mva) + nettleie + avgifter × mva.
+    spot_ore brukes ikke — fastprisavtale uavhengig av spot.
+    Norgespris gjelder ikke (fastpris 40 øre < 73 øre-grensen).
     hour: Time på dagen (0-23) for riktig nettariff (dag/natt).
     """
     grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
-
-    # Fastpris + nettleie + avgifter (eks mva), deretter × mva
-    total_inkl_mva = (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
-
-    # Norgespris-støtte trekkes fra ETTER mva (ingen mva på støtten)
-    return total_inkl_mva - NORGES_PRICE_ORE
+    return (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
 
 
 def sell_price_ore(spot_ore: float = 0.0) -> float:
