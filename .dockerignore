@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+dist
+build
+
+# Environment
+.env
+.venv
+venv/
+
+# Data (mountes som volume)
+data/
+logs/
+*.db
+*.sqlite3
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Scripts
+push-to-gitea.sh
+create-gitea-repo.sh

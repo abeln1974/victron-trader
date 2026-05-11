@@ -31,12 +31,73 @@ Automatisk strømhandel med Victron ESS. Kjøper strøm når den er billig, selg
 
 ## Oppsett
 
+### Alternativ 1: Docker (anbefalt for Proxmox)
+
+```bash
+# 1. Klon repo
+git clone https://gitea.abelgaard.no/lars/victron-trader.git
+cd victron-trader
+
+# 2. Konfigurer
+cp .env.example .env
+# Rediger .env med VICTRON_HOST og andre verdier
+
+# 3. Bygg og start
+docker-compose up -d
+
+# 4. Se logger
+docker-compose logs -f victron-trader
+
+# 5. Stopp
+docker-compose down
+```
+
+### Alternativ 2: Python direkte
+
 ```bash
 cp .env.example .env
 # Rediger .env med dine verdier
 pip install -r requirements.txt
 python main.py
 ```
+
+## Proxmox Deployment
+
+### Container/VM Setup
+
+Anbefalt: **LXC Container** på PVE1, PVE2, PVE3 eller PVE4:
+
+```bash
+# På Proxmox host (f.eks. PVE1)
+pct create 201 local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst \
+  --hostname victron-trader \
+  --cores 1 \
+  --memory 256 \
+  --swap 256 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+  --storage local-zfs
+
+pct start 201
+pct exec 201 -- bash -c "apt update && apt install -y docker.io docker-compose git"
+
+# Klon og start
+pct exec 201 -- bash -c "cd /opt && git clone https://gitea.abelgaard.no/lars/victron-trader.git"
+pct exec 201 -- bash -c "cd /opt/victron-trader && docker-compose up -d"
+```
+
+### Docker på eksisterende server
+
+Hvis du har Docker på f.eks. PVE1 eller LadeFiks (10.10.10.159):
+
+```bash
+ssh root@10.10.10.159
+cd /opt
+git clone https://gitea.abelgaard.no:3000/lars/victron-trader.git
+cd victron-trader
+docker-compose up -d
+```
+
+**Viktig**: Containeren må ha nettverkstilgang til Cerbo GX (192.168.1.x). Bruk `network_mode: host` i docker-compose.yml.
 
 ## Gitea (Abelgard)
 
@@ -50,4 +111,3 @@ git remote add origin http://gitea.abelgaard.no:3000/lars/victron-trader.git
 git add .
 git commit -m "Initial"
 git push -u origin main
-```

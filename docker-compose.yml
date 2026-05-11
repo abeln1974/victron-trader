@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  victron-trader:
+    build: .
+    container_name: victron-trader
+    restart: unless-stopped
+    
+    # Network mode for direct access to Victron on LAN
+    # Option 1: Host network (simplest, recommended for Proxmox)
+    network_mode: host
+    
+    # Option 2: Bridge network (hvis du vil isolere)
+    # networks:
+    #   - victron-net
+    
+    environment:
+      # Victron Modbus-TCP config
+      - VICTRON_HOST=${VICTRON_HOST:-192.168.1.100}
+      - VICTRON_MODBUS_PORT=${VICTRON_MODBUS_PORT:-502}
+      - VICTRON_UNIT_ID=${VICTRON_UNIT_ID:-246}
+      
+      # Market
+      - PRICE_AREA=${PRICE_AREA:-NO1}
+      - VAT=${VAT:-1.25}
+      
+      # Battery (Abelgard: 48kWh, 10kW max)
+      - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
+      - BATTERY_MAX_CHARGE_KW=${BATTERY_MAX_CHARGE_KW:-10}
+      - BATTERY_MAX_DISCHARGE_KW=${BATTERY_MAX_DISCHARGE_KW:-10}
+      - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
+      - MIN_SOC=${MIN_SOC:-50}
+      - MAX_SOC=${MAX_SOC:-95}
+      
+      # Strategy
+      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-0.30}
+      - FORECAST_HOURS=${FORECAST_HOURS:-24}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    
+    volumes:
+      # Persist database and logs
+      - ./data:/app/data
+      - ./logs:/app/logs
+    
+    # Optional: CPU/memory limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Optional: Bridge network (hvis ikke host network)
+# networks:
+#   victron-net:
+#     driver: bridge
