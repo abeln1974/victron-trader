@@ -312,22 +312,19 @@ class EVCSController:
             return
 
         # --- Beregn tilgjengelig kapasitet for EVCS ---
-        # Peak-limit minus nåværende forbruk eks EVCS
+        # grid_kw er total fra nett (inkl batteri-lading + EVCS + husforbruk).
+        # Tilgjengelig = peak_limit - (grid uten EVCS)
         evcs_kw = self.get_power_kw()
-        other_load_kw = grid_kw - evcs_kw + abs(min(battery_kw, 0))  # Forbruk uten EVCS
-        available_kw = self._peak_kw - other_load_kw
-
-        # Trekk fra batteriladingen hvis den går nå
-        if battery_action == 'charge':
-            available_kw -= abs(battery_kw)
+        grid_without_evcs = grid_kw - evcs_kw  # Hva grid ville vært uten EVCS
+        available_kw = self._peak_kw - grid_without_evcs
 
         # --- Scenario 2: Sol-overskudd om dagen → lad med overskudd ---
         hour = __import__("datetime").datetime.now(
             __import__("zoneinfo").ZoneInfo("Europe/Oslo")).hour
         is_day = 6 <= hour < 22
         if is_day and solar_kw > 0.5:
-            # Overskudd = sol - annet forbruk (ikke EVCS)
-            surplus_kw = solar_kw - (other_load_kw - evcs_kw)
+            # Overskudd = sol - grid uten EVCS (husforbruk + evt. batteri-lading)
+            surplus_kw = solar_kw - grid_without_evcs
             charge_kw = max(0, min(surplus_kw, available_kw,
                                    self._max_a * self._phases * 0.23))
             amps = int(charge_kw * 1000 / (self._phases * 230))
