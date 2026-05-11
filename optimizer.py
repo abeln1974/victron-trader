@@ -1,6 +1,6 @@
 """Optimalisering av lade/utlade-strategi."""
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from price_fetcher import PricePoint, PriceFetcher
 from tariff import (
@@ -250,8 +250,11 @@ class Optimizer:
                             soc: float, solar_kw: float = 0.0) -> Action:
         """Get action for current hour only."""
         plan = self.optimize(prices, soc, solar_kw)
+        now_utc_hour = datetime.now(timezone.utc).hour
         for action in plan:
-            if action.timestamp.hour == datetime.now().hour:
+            ts = action.timestamp
+            ts_hour = ts.hour if ts.tzinfo is None else ts.astimezone(timezone.utc).hour
+            if ts_hour == now_utc_hour:
                 return action
         return Action(timestamp=datetime.now(), action='idle', power_kw=0.0)
 

@@ -59,6 +59,7 @@ class EnergyTrader:
         """Run trading logic every hour + peak-shaving every 10 seconds."""
         last_hour = -1
         last_status_min = -1
+        last_keepalive = 0.0  # Siste gang vi sendte ESS keepalive
 
         while self.running:
             now = datetime.now()
@@ -70,6 +71,13 @@ class EnergyTrader:
 
             # Peak-shaving: sjekk grid-effekt hvert 10. sekund
             self._check_peak_shaving()
+
+            # ESS keepalive: Victron nullstiller setpoint etter 60s uten skriving.
+            # Send keepalive hvert 30s når vi er i aktiv kontrollmodus.
+            if self.current_action and self.current_action.action != 'idle':
+                if time.time() - last_keepalive >= 30:
+                    self.victron.send_keepalive()
+                    last_keepalive = time.time()
 
             # Log status hvert 5. minutt
             if now.minute % 5 == 0 and now.minute != last_status_min:

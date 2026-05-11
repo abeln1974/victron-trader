@@ -20,10 +20,10 @@ class VictronMQTT:
     TOPIC_GRID_POWER = "N/{}/grid/0/Power"
     TOPIC_BATTERY_POWER = "N/{}/battery/0/Power"
     
-    def __init__(self, host: str = CONFIG.victron_host, 
-                 port: int = CONFIG.victron_port,
-                 username: str = CONFIG.victron_username,
-                 password: str = CONFIG.victron_password):
+    def __init__(self, host: str = CONFIG.victron_host,
+                 port: int = 1883,
+                 username: str = "",
+                 password: str = ""):
         self.host = host
         self.port = port
         self.username = username

@@ -1,19 +1,14 @@
 """
 Qubino 3-fase smartmåler via Home Assistant REST API.
 
-Qubino ZMNHXD måler HUSFORBRUK (last-siden), IKKE grid-import/-eksport.
-Viktig: Qubino er ikke grid-måleren — den måler forbruk på husinstallasjonens
-bussbjelke, og inkluderer Fronius-produksjon på en måte som gjør verdiene
-vanskeleg å bruke direkte som grid-måling.
+Qubino ZMNHXD sitter på inntaket og måler grid-import/-eksport for alle 3 faser.
+Brukes som primærkilde for grid-effekt — VM-3P75CT (Modbus) er fallback.
 
-Grid-måler: VM-3P75CT via Victron Modbus-TCP (device_id=41/100)
-  - L1 og L2 måles korrekt
-  - L3 = 0W (kjent begrensning i IT-nett med VM-3P75CT)
+Fordel vs VM-3P75CT: Måler L3 korrekt i 3-fase IT-nett (230V L-N).
+VM-3P75CT viser L3=0W pga IT-nett-topologi.
 
-QubinoReader kan brukes til:
-  - Husforbruk totalt
-  - Fasefordeling av forbruk
-  - Fremtidig: kompensere manglende L3 i grid-målingen
+Entity _w_6 = total grid alle 3 faser (import positiv, eksport via production_w_*).
+Vi bruker consumption_w_6 som total grid-import (positiv = importerer fra nett).
 """
 import os
 import logging
@@ -167,8 +162,8 @@ class QubinoReader:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     q = QubinoReader()
-    print(f"HA URL: {HA_URL}")
-    print(f"Token satt: {'ja' if HA_TOKEN else 'NEI — sett HA_TOKEN'}")
+    print(f"HA URL: {q.ha_url}")
+    print(f"Token satt: {'ja' if q.ha_token else 'NEI — sett HA_TOKEN'}")
     print()
 
     power = q.get_grid_power()

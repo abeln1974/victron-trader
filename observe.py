@@ -32,7 +32,7 @@ REGISTERS = [
 
 
 def read_signed16(client, address):
-    result = client.read_holding_registers(address=address, count=1, slave=UNIT)
+    result = client.read_holding_registers(address=address, count=1, device_id=UNIT)
     if result.isError():
         return None
     val = result.registers[0]
@@ -40,7 +40,7 @@ def read_signed16(client, address):
 
 
 def read_32bit(client, address):
-    result = client.read_holding_registers(address=address, count=2, slave=UNIT)
+    result = client.read_holding_registers(address=address, count=2, device_id=UNIT)
     if result.isError():
         return None
     lo, hi = result.registers[0], result.registers[1]

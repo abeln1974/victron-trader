@@ -170,6 +170,7 @@ class VictronModbus:
             if result.isError():
                 logger.error(f"Modbus write error reg 2716/2717: {result}")
                 return False
+            self._last_setpoint = int(power_watts)
             action = "import" if power_watts > 0 else "export" if power_watts < 0 else "idle"
             logger.info(f"Grid setpoint: {power_watts}W ({action})")
             return True
@@ -189,7 +190,15 @@ class VictronModbus:
 
     def stop_ess_control(self) -> bool:
         """Returner kontroll til intern ESS (setpoint = 0)."""
+        self._last_setpoint = 0
         return self.set_grid_setpoint(0)
+
+    def send_keepalive(self) -> bool:
+        """
+        Gjenta siste setpoint for å hindre at Victron nullstiller ESS-kontroll.
+        Victron krever skriving minst hvert 60s — vi sender hvert 30s.
+        """
+        return self.set_grid_setpoint(getattr(self, '_last_setpoint', 0))
 
     def set_max_charge_current(self, amps: int) -> bool:
         """DVCC max charge current. -1 = ingen grense. (Register 2705)"""
