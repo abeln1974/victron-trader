@@ -5,7 +5,7 @@ services:
     build: .
     container_name: victron-trader
     restart: unless-stopped
-    
+
     # Network mode for direct access to Victron on LAN
     # Host network gir enklest tilgang til Cerbo GX på 192.168.1.x
     network_mode: host
@@ -59,6 +59,26 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  victron-web:
+    build: .
+    container_name: victron-web
+    restart: unless-stopped
+    command: python web.py
+    ports:
+      - "8080:8080"
+    environment:
+      - PRICE_AREA=${PRICE_AREA:-NO1}
+      - VAT=${VAT:-1.25}
+      - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
+      - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
+      - MIN_SOC=${MIN_SOC:-50}
+      - MAX_SOC=${MAX_SOC:-95}
+      - WEB_PORT=8080
+      - DB_PATH=/app/data/profit.db
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
 
 # Optional: Bridge network (hvis ikke host network)
 # networks:

@@ -123,6 +123,28 @@ class ProfitTracker:
         }
 
 
+    def get_recent_trades(self, limit: int = 20) -> list:
+        """Hent siste N handler for dashboard."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute(
+            "SELECT timestamp, trade_type, energy_kwh, price_nok_kwh, net_profit_nok "
+            "FROM trades ORDER BY timestamp DESC LIMIT ?",
+            (limit,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {
+                "timestamp": row[0],
+                "trade_type": row[1],
+                "energy_kwh": row[2],
+                "price_nok_kwh": row[3],
+                "net_profit_nok": row[4],
+            }
+            for row in rows
+        ]
+
+
 if __name__ == "__main__":
     tracker = ProfitTracker()
     
