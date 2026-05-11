@@ -10,7 +10,7 @@ from typing import Optional
 from config import CONFIG
 from price_fetcher import PriceFetcher
 from optimizer import Optimizer, Action
-from victron_mqtt import VictronMQTT
+from victron_modbus import VictronModbus
 from profit_tracker import ProfitTracker
 
 # Setup logging
@@ -25,7 +25,7 @@ class EnergyTrader:
     def __init__(self):
         self.price_fetcher = PriceFetcher()
         self.optimizer = Optimizer()
-        self.victron = VictronMQTT()
+        self.victron = VictronModbus()
         self.tracker = ProfitTracker()
         self.running = False
         self.current_action: Optional[Action] = None
@@ -34,13 +34,14 @@ class EnergyTrader:
         """Start the trading loop."""
         logger.info("Starting Energy Trader...")
         
-        # Connect to Victron
+        # Connect to Victron via Modbus-TCP
         if not self.victron.connect():
-            logger.error("Failed to connect to Victron MQTT. Check VICTRON_HOST.")
+            logger.error("Failed to connect to Victron Modbus-TCP. Check VICTRON_HOST and that Modbus-TCP is enabled on Cerbo GX.")
+            logger.error("Aktiver Modbus-TCP: Settings → Services → Modbus-TCP → Enabled")
             sys.exit(1)
         
-        logger.info(f"Connected. Waiting for SOC data...")
-        time.sleep(2)  # Wait for initial data
+        logger.info(f"Connected via Modbus-TCP. Reading SOC...")
+        time.sleep(1)
 
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -142,9 +143,8 @@ class EnergyTrader:
     def _log_status(self):
         """Log current system status."""
         soc = self.victron.get_soc()
-        grid = self.victron.grid_power
-        battery = self.victron.battery_power
-        logger.debug(f"Status SOC={soc}% Grid={grid}W Battery={battery}W")
+        grid = self.victron.get_grid_power()
+        logger.debug(f"Status SOC={soc}% Grid={grid}W")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
@@ -157,7 +157,7 @@ class EnergyTrader:
         logger.info("Stopping...")
         
         # Return control to ESS
-        if self.victron._connected:
+        if hasattr(self.victron, '_connected') and self.victron._connected:
             self.victron.stop_ess_control()
             time.sleep(1)
             self.victron.disconnect()

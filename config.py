@@ -8,11 +8,10 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Config:
-    # Victron MQTT
+    # Victron Modbus-TCP
     victron_host: str = os.getenv("VICTRON_HOST", "192.168.1.100")
-    victron_port: int = int(os.getenv("VICTRON_PORT", "1883"))
-    victron_username: str = os.getenv("VICTRON_USERNAME", "")
-    victron_password: str = os.getenv("VICTRON_PASSWORD", "")
+    victron_modbus_port: int = int(os.getenv("VICTRON_MODBUS_PORT", "502"))
+    victron_unit_id: int = int(os.getenv("VICTRON_UNIT_ID", "246"))
 
     # Market
     price_area: str = os.getenv("PRICE_AREA", "NO1")

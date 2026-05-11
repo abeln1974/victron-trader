@@ -2,16 +2,32 @@
 
 Automatisk strømhandel med Victron ESS. Kjøper strøm når den er billig, selger (bruker fra batteri) når den er dyr.
 
-**⚠️ Viktig for Abelgard-oppsett**: DESS (Dynamic ESS) er aktiv på din Cerbo GX. DESS kolliderer med ekstern ESS-styring via MQTT. Du må enten:
-1. Deaktivere DESS i VRM/Venus OS før du bruker dette programmet, ELLER
-2. Bruke VRM API istedenfor MQTT (modifisert versjon)
+**✅ Modbus-TCP versjon** - Industristandard protokoll, raskere og mer stabil enn MQTT.
+
+**⚠️ Viktig for Abelgard-oppsett**: DESS (Dynamic ESS) må deaktiveres for ekstern styring:
+1. Gå til VRM → Site 411797 → Settings → ESS
+2. Skru av "Dynamic ESS"
+3. Sett ESS Mode til "External control" (eller behold "Optimized" for Mode 2)
 
 ## Arkitektur
 
 - **price_fetcher**: Henter spotpriser fra hvakosterstrommen.no
-- **optimizer**: Beregner optimal lade/utlade-plan
-- **victron_mqtt**: Styrer ESS via MQTT mot Cerbo GX
-- **profit_tracker**: Logger inntjening og ytelse
+- **optimizer**: Beregner optimal lade/utlade-plan (48kWh-optimert for Abelgard)
+- **victron_modbus**: Styrer ESS via Modbus-TCP (ESS Mode 2 - Grid Setpoint)
+- **vrm_api**: Backup for monitoring via VRM API
+- **profit_tracker**: SQLite-logging av inntjening
+
+## Modbus-TCP vs MQTT
+
+| Feature | Modbus-TCP | MQTT |
+|---------|-----------|------|
+| Responstid | ~100ms | ~1s |
+| Keep-alive | Nei | Ja (krever broker) |
+| Industristandard | ✅ | Nei |
+| Oppsett | Enkelt | Krever MQTT broker |
+| VRM korrekt | Nei | Nei |
+
+**Valg for Abelgard**: Modbus-TCP (port 502) direkte til Cerbo GX.
 
 ## Oppsett
 
