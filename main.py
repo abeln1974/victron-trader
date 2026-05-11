@@ -45,6 +45,13 @@ class EnergyTrader:
         logger.info(f"Connected via Modbus-TCP. Reading SOC...")
         time.sleep(1)
 
+        # Aktiver External Control (ESS modus 4) for full Modbus-styring
+        if not self.victron.enable_external_control():
+            logger.warning("Kunne ikke sette ESS External Control — fortsetter i Optimized modus")
+        else:
+            time.sleep(2)
+            logger.info(f"ESS modus: {self.victron.get_ess_mode()} (4=ExternalControl)")
+
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -216,9 +223,9 @@ class EnergyTrader:
         self.running = False
         logger.info("Stopping...")
         
-        # Return control to ESS
+        # Tilbakestill ESS til Optimized og koble fra
         if hasattr(self.victron, '_connected') and self.victron._connected:
-            self.victron.stop_ess_control()
+            self.victron.disable_external_control()
             time.sleep(1)
             self.victron.disconnect()
         

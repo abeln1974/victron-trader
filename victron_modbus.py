@@ -48,12 +48,15 @@ class VictronModbus:
     ESS Mode 2: Ekstern kontroll med Grid Setpoint
     """
     
-    # ESS Mode 2 kontroll-registre (Unit-ID 100, Venus OS >= 3.50)
-    # Kilde: https://www.victronenergy.com/live/ess:ess_mode_2_and_3
-    REG_GRID_SETPOINT_LO  = 2716   # Grid power setpoint 32-bit low word (W)
-    REG_GRID_SETPOINT_HI  = 2717   # Grid power setpoint 32-bit high word (W)
+    # ESS kontroll-registre (Unit-ID 100) — verifisert mot CCGX-Modbus-TCP-register-list-3.71
+    REG_GRID_SETPOINT_LO  = 2716   # AC grid setpoint 32-bit low word (hub4, volatile, W)
+    REG_GRID_SETPOINT_HI  = 2717   # AC grid setpoint 32-bit high word
+    REG_ESS_MODE          = 2902   # ESS Mode: 1=Opt+BL, 2=Opt, 3=KeepCharged, 4=ExternalControl
     REG_MAX_CHARGE_AMP    = 2705   # DVCC max charge current (A, -1=ingen grense)
     REG_MAX_DISCHARGE_W   = 2704   # Max inverter/discharge power (W, -1=ingen grense)
+
+    ESS_MODE_OPTIMIZED    = 2      # Optimized without BatteryLife (normal drift)
+    ESS_MODE_EXTERNAL     = 4      # External Control (full Modbus-styring)
 
     # System unit (100) read-only registre
     REG_SOC               = 266    # Battery SOC (scale /10 → %)
@@ -63,9 +66,9 @@ class VictronModbus:
     REG_PV_POWER          = 808    # AC-coupled PV on AC output L1 (W) - Fronius Primo 5kW
 
     # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
-    UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS setpoint(2716/2700)
+    UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS(2716/2902)
     UNIT_BATTERY          = 226    # com.victronenergy.battery: SmartShunt 500A — SOC(266)
-    UNIT_VEBUS            = 227    # com.victronenergy.vebus: MultiPlus-II parallell — ESS reg37
+    UNIT_VEBUS            = 227    # com.victronenergy.vebus: MultiPlus-II parallell
     
     def __init__(self,
                  host: str = CONFIG.victron_host,
@@ -187,6 +190,49 @@ class VictronModbus:
         """Sett utladefart i kW."""
         watts = -int(discharge_kw * 1000)
         return self.set_grid_setpoint(watts)
+
+    def enable_external_control(self) -> bool:
+        """Sett ESS Mode 4 (External Control) — nødvendig for full Modbus-styring."""
+        if self.readonly:
+            return False
+        try:
+            r = self.client.write_register(
+                address=self.REG_ESS_MODE, value=self.ESS_MODE_EXTERNAL,
+                device_id=self.UNIT_SYSTEM)
+            if not r.isError():
+                logger.info("ESS satt til External Control (modus 4)")
+                return True
+            logger.error(f"enable_external_control feilet: {r}")
+        except Exception as e:
+            logger.exception("enable_external_control feilet")
+        return False
+
+    def disable_external_control(self) -> bool:
+        """Tilbake til ESS Optimized without BatteryLife (modus 2)."""
+        if self.readonly:
+            return False
+        try:
+            self.set_grid_setpoint(-50)  # ESS default setpoint
+            r = self.client.write_register(
+                address=self.REG_ESS_MODE, value=self.ESS_MODE_OPTIMIZED,
+                device_id=self.UNIT_SYSTEM)
+            if not r.isError():
+                logger.info("ESS tilbake til Optimized (modus 2)")
+                return True
+        except Exception as e:
+            logger.exception("disable_external_control feilet")
+        return False
+
+    def get_ess_mode(self) -> Optional[int]:
+        """Les nåværende ESS-modus (reg 2902)."""
+        try:
+            r = self.client.read_holding_registers(
+                address=self.REG_ESS_MODE, count=1, device_id=self.UNIT_SYSTEM)
+            if r and not r.isError():
+                return r.registers[0]
+        except Exception:
+            pass
+        return None
 
     def stop_ess_control(self) -> bool:
         """Returner kontroll til intern ESS (setpoint = 0)."""
