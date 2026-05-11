@@ -99,9 +99,15 @@ class EnergyTrader:
             
             logger.info(f"Current price: {current.price_nok_kwh:.3f} kr/kWh")
 
+            # Les sol-produksjon
+            solar_w = self.victron.get_solar_power() or 0
+            solar_kw = solar_w / 1000.0
+            if solar_kw > 0:
+                logger.info(f"Sol-produksjon: {solar_kw:.2f} kW")
+
             # Get optimal action
-            action = self.optimizer.get_immediate_action(current, prices, soc)
-            logger.info(f"Optimal action: {action.action} @ {action.power_kw:.1f}kW")
+            action = self.optimizer.get_immediate_action(current, prices, soc, solar_kw)
+            logger.info(f"Optimal action: {action.action} @ {action.power_kw:.1f}kW | {action.reason}")
 
             # Execute
             self._execute_action(action, soc, current.price_nok_kwh)

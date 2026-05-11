@@ -28,13 +28,14 @@ class VictronModbus:
     """
     
     # Modbus registers for ESS Mode 2 (VE.Bus unit)
-    REG_GRID_SETPOINT = 37      # L1 power setpoint (Watts, signed)
+    REG_GRID_SETPOINT  = 37     # L1 power setpoint (Watts, signed)
     REG_DISABLE_CHARGE = 38     # 0=charge enabled, 1=disabled
     REG_DISABLE_FEEDIN = 39     # 0=feed-in enabled, 1=disabled
-    
-    # Unit IDs
-    UNIT_VEBUS = 246            # Multi/Quattro via VE.Bus
-    UNIT_SYSTEM = 100           # System overview
+
+    # System unit (100) registers
+    REG_SOC            = 266    # Battery SOC (scale /10 → %)
+    REG_GRID_L1        = 820    # Grid L1 power (W, signed)
+    REG_PV_POWER       = 850    # PV / Solar charger power (W) - Fronius Primo
     
     def __init__(self, 
                  host: str = CONFIG.victron_host,
@@ -203,6 +204,27 @@ class VictronModbus:
                 return float(val)
         except Exception as e:
             logger.debug(f"Could not read grid power: {e}")
+        return None
+
+
+    def get_solar_power(self) -> Optional[float]:
+        """
+        Hent sol-produksjon fra Fronius Primo (AC-coupled via PV inverter).
+        Register 850: PV power (W) fra system unit.
+        """
+        try:
+            result = self.client.read_holding_registers(
+                address=self.REG_PV_POWER,
+                count=1,
+                slave=100
+            )
+            if result and not result.isError() and result.registers:
+                val = result.registers[0]
+                if val > 32767:
+                    val -= 65536
+                return float(max(0, val))  # Alltid positiv (produksjon)
+        except Exception as e:
+            logger.debug(f"Could not read solar power: {e}")
         return None
 
 

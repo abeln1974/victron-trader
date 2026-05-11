@@ -36,11 +36,16 @@ class Optimizer:
         self.peak_limit_kw  = PEAK_SHAVING_LIMIT_KW
         self.peak_reserve   = PEAK_SHAVING_RESERVE_KWH
 
-    def optimize(self, prices: List[PricePoint], current_soc: float = 50.0) -> List[Action]:
+    def optimize(self, prices: List[PricePoint], current_soc: float = 50.0,
+                solar_kw: float = 0.0) -> List[Action]:
         """
-        Strategi basert på reelle kjøps- og salgspriser (Kraftriket/Elvia):
-        - Lad når innkjøpspris er lav nok til at vi tjener på å selge senere
-        - Utlad når spotpris er over salgspris (75 øre) - vi sparer å kjøpe dyr strøm
+        Strategi - prioritert rekkefølge:
+        1. Natt (22-06): Lad fra nett når spotpris er lav (billigst pga Norgespris)
+        2. Dag (06-22):  La sol lade batteriet GRATIS - ikke kjøp fra nett
+        3. Ettermiddag:  Utlad når spotpris er høy (spar dyr gridstrøm)
+        4. Peak-shaving: Alltid klar med 5 kWh reserve
+
+        solar_kw: Nåværende sol-produksjon (kW) - unngå å lade fra nett når sol lader
         """
         if not prices:
             return []
@@ -51,7 +56,7 @@ class Optimizer:
         for p in prices:
             spot_ore = p.price_ore_kwh / CONFIG.vat  # Konverter tilbake til eks mva
             hour = p.timestamp.hour
-            action = self._decide_action_tariff(p, soc, spot_ore, hour)
+            action = self._decide_action_tariff(p, soc, spot_ore, hour, solar_kw)
             actions.append(action)
 
             # Simuler SOC-endring for planlegging
@@ -101,21 +106,24 @@ class Optimizer:
         )
 
     def _decide_action_tariff(self, price: PricePoint, soc: float,
-                               spot_ore: float, hour: int) -> Action:
+                               spot_ore: float, hour: int,
+                               solar_kw: float = 0.0) -> Action:
         """
-        Beslutning basert på reelle priser.
+        Beslutning basert på reelle priser + sol-produksjon.
 
         Prioritet:
-        1. Peak-shaving (alltid først - kapasitetsledd er garantert gevinst)
-        2. Arbitrasje utlad (spotpris høy)
-        3. Arbitrasje lad (spotpris lav)
+        1. Utlad: Spotpris høy → spar dyr gridstrøm
+        2. Lad fra nett: KUN om natten (22-06) når spotpris er lav
+           - Om dagen lader sol gratis → ikke kast penger på nett-lading
+        3. Idle: Sol håndterer lading, ESS styrer selv
         """
         buy_ore  = buy_price_ore(spot_ore, hour)
         sell_ore = sell_price_ore()
+        is_night = not (6 <= hour < 22)
+        sol_lader = solar_kw > 0.5  # Sol produserer nok til å lade batteri
 
         # --- UTLAD: Spotpris er høy → bruk batteri istedenfor dyr gridstrøm ---
         if should_discharge(spot_ore, hour) and soc > self.min_soc:
-            # Reserver peak_reserve kWh til peak-shaving
             avail_kwh = max(0, self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve)
             if avail_kwh > 0:
                 power = min(self.max_discharge, avail_kwh)
@@ -125,22 +133,28 @@ class Optimizer:
                              power_kw=-power, expected_profit_nok=profit,
                              reason=f'Spot {spot_ore:.0f}ø > salg {sell_ore:.0f}ø')
 
-        # --- LAD: Innkjøpspris er lav → fyll batteri ---
+        # --- LAD FRA NETT: Kun om natten + spotpris er lav ---
+        # Om dagen: la sol lade gratis, spar nett-kostnaden
         elif should_charge(spot_ore, hour) and soc < self.max_soc:
-            avail_kwh = self.capacity * (self.max_soc - soc) / 100
-            power = min(self.max_charge, avail_kwh)
-            cost = power * buy_ore / 100
-            return Action(timestamp=price.timestamp, action='charge',
-                         power_kw=power, expected_profit_nok=-cost,
-                         reason=f'Billig spot {spot_ore:.0f}ø, kjøp billig')
+            if is_night:
+                avail_kwh = self.capacity * (self.max_soc - soc) / 100
+                power = min(self.max_charge, avail_kwh)
+                cost = power * buy_ore / 100
+                return Action(timestamp=price.timestamp, action='charge',
+                             power_kw=power, expected_profit_nok=-cost,
+                             reason=f'Natt-lading: spot {spot_ore:.0f}ø (billig)')
+            elif sol_lader:
+                # Sol lader batteriet gratis om dagen - idle fra nett
+                return Action(timestamp=price.timestamp, action='idle', power_kw=0.0,
+                             reason=f'Sol {solar_kw:.1f}kW lader gratis')
 
         return Action(timestamp=price.timestamp, action='idle', power_kw=0.0)
 
-    def get_immediate_action(self, current_price: PricePoint, 
-                            prices: List[PricePoint], 
-                            soc: float) -> Action:
+    def get_immediate_action(self, current_price: PricePoint,
+                            prices: List[PricePoint],
+                            soc: float, solar_kw: float = 0.0) -> Action:
         """Get action for current hour only."""
-        plan = self.optimize(prices, soc)
+        plan = self.optimize(prices, soc, solar_kw)
         for action in plan:
             if action.timestamp.hour == datetime.now().hour:
                 return action
