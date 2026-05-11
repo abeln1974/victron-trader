@@ -23,7 +23,7 @@ from config import CONFIG
 
 # Farco 12kWh NMC batteri (4 stk = 48kWh)
 # NMC-kjemi: typisk 2000-3000 sykluser til 80% kapasitet
-BATTERY_COST_NOK        = 120_000   # Estimert kostnad 4x Farco 12kWh (ca 30k/stk)
+BATTERY_COST_NOK        = 60_000    # 4x Farco 12kWh à 15 000 kr (tilbudspris)
 BATTERY_CYCLES_LIFETIME = 2500      # Konservativt for NMC
 BATTERY_KWH_USABLE      = 48 * (0.95 - 0.50)  # 22.8 kWh brukbart per syklus
 
