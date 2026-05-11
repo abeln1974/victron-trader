@@ -228,7 +228,7 @@ class EnergyTrader:
             grid_kw = grid_w / 1000.0
             peak_kw = self.optimizer.peak_limit_kw
 
-            if grid_kw <= peak_kw:
+            if grid_kw <= peak_kw + 0.3:  # 0.3 kW hysterese — ikke jag små svingninger
                 return
 
             # Grid over grensen — er vi i ferd med å lade?
