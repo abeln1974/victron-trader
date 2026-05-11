@@ -348,6 +348,20 @@ class VictronModbus:
             logger.debug(f"get_soc feilet: {e}")
         return None
 
+    def get_battery_power(self) -> int:
+        """Returnerer batterieffekt i Watt (positiv=lading, negativ=utlading)."""
+        try:
+            r = self.client.read_holding_registers(
+                address=self.REG_BATTERY_POWER, count=1, device_id=self.UNIT_SYSTEM)
+            if r.isError():
+                return 0
+            val = r.registers[0]
+            # Håndter signed16 verdier
+            return val - 65536 if val > 32767 else val
+        except Exception:
+            logger.exception("get_battery_power feilet")
+            return 0
+
     def get_grid_power(self) -> Optional[float]:
         """
         Total grid-effekt for Abelgård 3-fase IT-nett.
