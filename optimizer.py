@@ -1,4 +1,5 @@
 """Optimalisering av lade/utlade-strategi."""
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
@@ -74,16 +75,17 @@ class Optimizer:
             return (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
 
         # Topp-N strategi: velg de beste timene batteriet faktisk rekker
-        # Sorter alle lønnsomme timer på høyeste råpris, ta fra toppen inntil batteri er tomt.
-        # Dette sikrer at vi alltid selger i de dyreste timene — ikke bare "over median"
-        # som kan inkludere for mange middels-timer når i dag+i morgen blandes.
-        usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
+        # Bruk max_soc som planlagt SOC — vi antar batteriet lades fullt om natten
+        # før neste dags discharge-timer. Dette sikrer at vi planlegger for full kapasitet.
+        planned_soc = max(current_soc, self.max_soc)  # Anta full lading før neste dag
+        usable_kwh = self.capacity * (planned_soc - self.min_soc) / 100 - self.peak_reserve
         remaining_kwh = max(0, usable_kwh)
 
         discharge_candidates = sorted(
             [(i, p) for i, p in enumerate(prices)
-             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)],
-            key=lambda x: raw_buy(x[1]),
+             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)
+             and 6 <= p.timestamp.astimezone(OSLO_TZ).hour < 22],  # Kun dagtid — natt reserveres for lading
+            key=lambda x: sell_ore(x[1]),  # Sorter på salgspris (spot) — høyest spot gir mest inntekt
             reverse=True  # Beste pris først
         )
 
@@ -95,6 +97,13 @@ class Optimizer:
             remaining_kwh -= min(self.max_discharge, remaining_kwh)
 
         # --- Finn de beste ladetimene (laveste kjopspris, kun natt) ---
+        # Lademål: max_soc minus sol-reserve
+        # 5kW × 4 effektive solhours (realistisk NO mai-aug) = 20 kWh = 44% av 45.6 kWh
+        # Vi lader aldri over (max_soc - solar_reserve) om natten — sol tar resten
+        solar_effective_hours = float(os.getenv("SOLAR_EFFECTIVE_HOURS", "4"))
+        solar_reserve_kwh = CONFIG.solar_max_kw * solar_effective_hours
+        solar_reserve_pct = min(40.0, (solar_reserve_kwh / self.capacity) * 100)  # maks 40% reserve
+        charge_target_soc = self.max_soc - solar_reserve_pct
         charge_hours = set()
         night_candidates = sorted(
             [(i, bp) for i, bp in enumerate(buy_prices)
@@ -103,14 +112,14 @@ class Optimizer:
         )
         discharged_kwh = len(profitable_hours) * self.max_discharge
         soc_after_discharge = max(self.min_soc, current_soc - (discharged_kwh / self.capacity * 100))
-        space_kwh = self.capacity * (self.max_soc - soc_after_discharge) / 100
-        remaining_charge = max(0, space_kwh)
+        # Beregn hvor mye som MÅ lades — legg til 20% buffer for peak-shaving-reduksjon
+        space_kwh = self.capacity * (charge_target_soc - soc_after_discharge) / 100
+        remaining_charge = max(0, space_kwh * 1.2)  # 20% buffer for peak-shaving-tap
         for idx, bp in night_candidates:
             if remaining_charge <= 0:
                 break
-            if bp < sell_ore(prices[idx]) * self.efficiency:
-                charge_hours.add(idx)
-                remaining_charge -= min(self.max_charge, remaining_charge)
+            charge_hours.add(idx)
+            remaining_charge -= min(self.max_charge, remaining_charge)
 
         # --- Bygg handlingsplan ---
         actions = []
