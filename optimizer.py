@@ -69,20 +69,21 @@ class Optimizer:
             grid = GRID_TARIFF_DAY_ORE if is_day_tariff(h) else GRID_TARIFF_NIGHT_ORE
             return (p.price_ore_kwh / CONFIG.vat + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
 
-        # Beregn median rawkjopspris i perioden — selg kun i timer over medianen
-        all_raw = sorted([raw_buy(p) for p in prices])
-        median_raw = all_raw[len(all_raw) // 2]
-
-        profitable_hours = set()
-        discharge_candidates = sorted(
-            [(i, p) for i, p in enumerate(prices)
-             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)
-             and raw_buy(p) >= median_raw],
-            key=lambda x: raw_buy(x[1]),
-            reverse=True
-        )
+        # Topp-N strategi: velg de beste timene batteriet faktisk rekker
+        # Sorter alle lønnsomme timer på høyeste råpris, ta fra toppen inntil batteri er tomt.
+        # Dette sikrer at vi alltid selger i de dyreste timene — ikke bare "over median"
+        # som kan inkludere for mange middels-timer når i dag+i morgen blandes.
         usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
         remaining_kwh = max(0, usable_kwh)
+
+        discharge_candidates = sorted(
+            [(i, p) for i, p in enumerate(prices)
+             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)],
+            key=lambda x: raw_buy(x[1]),
+            reverse=True  # Beste pris først
+        )
+
+        profitable_hours = set()
         for idx, price_point in discharge_candidates:
             if remaining_kwh <= 0:
                 break
