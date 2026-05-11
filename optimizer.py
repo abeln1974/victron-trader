@@ -115,7 +115,9 @@ class Optimizer:
         for i, p in enumerate(prices):
             spot_ore = p.price_ore_kwh / CONFIG.vat
             hour = p.timestamp.hour
-            is_night = not (6 <= hour < 22)
+            # Konverter UTC til lokal tid (Norge UTC+2 sommertid)
+            local_hour = (hour + 2) % 24
+            is_night = not (6 <= local_hour < 22)
             sol_lader = solar_kw >= CONFIG.solar_threshold_kw
             buy_ore = buy_prices[i]
 
@@ -214,7 +216,9 @@ class Optimizer:
         """
         buy_ore  = buy_price_ore(spot_ore, hour)
         sell_ore = sell_price_ore()
-        is_night = not (6 <= hour < 22)
+        # Konverter UTC til lokal tid (Norge UTC+2 sommertid)
+        local_hour = (hour + 2) % 24
+        is_night = not (6 <= local_hour < 22)
         sol_lader = solar_kw >= CONFIG.solar_threshold_kw  # Fronius Primo 5kW, terskel 0.5kW
 
         # --- UTLAD: Spotpris er høy → bruk batteri istedenfor dyr gridstrøm ---

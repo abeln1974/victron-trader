@@ -20,8 +20,8 @@ UNIT = 100  # com.victronenergy.system
 REGISTERS = [
     (266,  1, 10.0,   "Batteri SOC",          "%"),
     (820,  1, 1.0,    "Grid L1 effekt",        "W"),
-    (817,  1, 1.0,    "Grid L2 effekt",        "W"),
-    (818,  1, 1.0,    "Grid L3 effekt",        "W"),
+    (821,  1, 1.0,    "Grid L2 effekt",        "W"),
+    (822,  1, 1.0,    "Grid L3 effekt",        "W"),
     (850,  1, 1.0,    "PV/Sol effekt",         "W"),
     (842,  1, 1.0,    "Batteri effekt",        "W"),
     (843,  1, 1.0,    "Batteri spenning",      "V (x10)"),

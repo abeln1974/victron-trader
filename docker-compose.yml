@@ -24,9 +24,9 @@ services:
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
       
-      # Battery (Abelgard: 4x12kWh=48kWh NMC, 10kW max)
+      # Battery (Abelgard: 4x12.5kWh=50kWh NMC, 10kW max)
       # NMC: hold 20-90% for lang levetid (unngå langvarig >90% og <20%)
-      - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
+      - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-50}
       - BATTERY_MAX_CHARGE_KW=${BATTERY_MAX_CHARGE_KW:-10}
       - BATTERY_MAX_DISCHARGE_KW=${BATTERY_MAX_DISCHARGE_KW:-10}
       - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}

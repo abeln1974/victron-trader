@@ -50,7 +50,7 @@ class EnergyTrader:
         # setpoint (reg2716) som overlay for peak-shaving og trading.
         mode = self.victron.get_ess_mode()
         logger.info(f"ESS modus: {mode} (2=Optimized, 4=ExternalControl)")
-        if mode != self.victron.ESS_MODE_OPTIMIZED:
+        if mode != self.victron.HUB4_MODE_OPTIMIZED:
             logger.warning(f"ESS modus er {mode}, forventet 2 (Optimized without BatteryLife)")
 
         # Sett min SOC — NMC: ikke utlad under 20%
@@ -228,9 +228,9 @@ class EnergyTrader:
         self.running = False
         logger.info("Stopping...")
         
-        # Nullstill setpoint og koble fra
+        # Nullstill setpoint og tilbakestill ESS til Mode 2
         if hasattr(self.victron, '_connected') and self.victron._connected:
-            self.victron.set_grid_setpoint(-50)  # ESS default grid setpoint
+            self.victron.stop_ess_control()  # Tilbake til Hub4Mode=2 og nullstill reg 37
             time.sleep(1)
             self.victron.disconnect()
         

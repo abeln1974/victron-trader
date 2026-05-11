@@ -153,7 +153,8 @@ def api_plan():
     if not prices:
         return jsonify([])
     opt = Optimizer()
-    plan = opt.optimize(prices, current_soc=70.0)  # Bruker 70% som default uten live Modbus
+    current_soc = _live_cache.get("soc", 70.0)  # Bruk reell SOC fra cache
+    plan = opt.optimize(prices, current_soc=current_soc)
     return jsonify([{
         "time": a.timestamp.strftime("%H:%M"),
         "action": a.action,
