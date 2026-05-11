@@ -86,7 +86,7 @@ def get_prices_cached():
         now = datetime.now(OSLO_TZ)
         if not _price_cache["fetched"] or (now - _price_cache["fetched"]).seconds > 1800:
             try:
-                _price_cache["data"] = fetcher.get_prices(24)
+                _price_cache["data"] = fetcher.get_prices(36)  # Hent i dag + i morgen (alle tilgjengelige)
                 _price_cache["fetched"] = now
             except Exception:
                 pass
@@ -131,7 +131,7 @@ def api_status():
 def api_prices():
     prices = get_prices_cached()
     return jsonify([{
-        "time": p.timestamp.strftime("%H:%M"),
+        "time": p.timestamp.astimezone(OSLO_TZ).strftime("%d.%m %H:%M"),
         "spot_ore": round(p.price_ore_kwh / CONFIG.vat, 1),
         "buy_ore": round(buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour), 1),
         "sell_ore": round(sell_price_ore(), 2),
@@ -161,7 +161,7 @@ def api_plan():
     current_soc = _live_cache.get("soc", 70.0)  # Bruk reell SOC fra cache
     plan = opt.optimize(prices, current_soc=current_soc)
     return jsonify([{
-        "time": a.timestamp.astimezone(OSLO_TZ).strftime("%H:%M"),
+        "time": a.timestamp.astimezone(OSLO_TZ).strftime("%d.%m %H:%M"),
         "action": a.action,
         "power_kw": round(a.power_kw, 1),
         "reason": a.reason,
