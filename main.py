@@ -201,6 +201,7 @@ class EnergyTrader:
             if success:
                 self.tracker.log_trade("buy", energy_kwh, price)
                 logger.info(f"Charging {action.power_kw:.1f}kW")
+                self.current_action = action  # Sett for keepalive
             
         elif action.action == 'discharge':
             if soc <= CONFIG.min_soc:
@@ -212,9 +213,11 @@ class EnergyTrader:
             if success:
                 self.tracker.log_trade("sell", energy_kwh, price)
                 logger.info(f"Discharging {abs(action.power_kw):.1f}kW | {action.reason}")
+                self.current_action = action  # Sett for keepalive
 
         else:
             self.victron.stop_ess_control()
+            self.current_action = None  # Nullstill for keepalive
             logger.info("Idle - ESS styrer selv")
 
     def _log_status(self):
