@@ -84,10 +84,10 @@ class EnergyTrader:
             # Peak-shaving: sjekk grid-effekt hvert 10. sekund
             self._check_peak_shaving()
 
-            # ESS keepalive: Victron nullstiller setpoint etter 60s uten skriving.
-            # Send keepalive hvert 30s når vi er i aktiv kontrollmodus.
+            # ESS keepalive: Mode 3 via VE.Bus reg 37 krever skriving hvert ~10s.
+            # Vi sender hvert 5s for å være sikre på at setpointet holdes aktivt.
             if self.current_action and self.current_action.action != 'idle':
-                if time.time() - last_keepalive >= 30:
+                if time.time() - last_keepalive >= 5:
                     self.victron.send_keepalive()
                     last_keepalive = time.time()
 

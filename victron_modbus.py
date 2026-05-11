@@ -48,16 +48,22 @@ class VictronModbus:
     ESS Mode 2: Ekstern kontroll med Grid Setpoint
     """
     
-    # ESS kontroll-registre (Unit-ID 100) — verifisert mot CCGX-Modbus-TCP-register-list-3.71
-    REG_GRID_SETPOINT_LO  = 2716   # AC grid setpoint 32-bit low word (hub4, volatile, W)
-    REG_GRID_SETPOINT_HI  = 2717   # AC grid setpoint 32-bit high word
-    REG_ESS_MODE          = 2902   # ESS Mode: 1=Opt+BL, 2=Opt, 3=KeepCharged, 4=ExternalControl
-    REG_ESS_MIN_SOC       = 2901   # ESS Minimum SoC (scale x10, eks 200 = 20%)
+    # ESS kontroll-registre — verifisert via test mot Cerbo GX v3.72
+    # Mode 3 (External Control) krever Hub4Mode=3 + direkte VE.Bus setpoint reg 37
+    REG_GRID_SETPOINT_LO  = 2716   # Hub4 AC grid setpoint (Mode 2, blir overstyrt av grid-meter!)
+    REG_GRID_SETPOINT_HI  = 2717
+    REG_HUB4_MODE         = 2902   # /Settings/Cgwacs/Hub4Mode: 2=Opt, 3=ESS Control Disabled
+    REG_ESS_MIN_SOC       = 2901   # ESS Minimum SoC (scale x10, 200 = 20%)
     REG_MAX_CHARGE_AMP    = 2705   # DVCC max charge current (A, -1=ingen grense)
     REG_MAX_DISCHARGE_W   = 2704   # Max inverter/discharge power (W, -1=ingen grense)
 
-    ESS_MODE_OPTIMIZED    = 2      # Optimized without BatteryLife (normal drift)
-    ESS_MODE_EXTERNAL     = 4      # External Control (full Modbus-styring)
+    # Mode 3 — direkte VE.Bus styring (bypasser grid-meter loop)
+    REG_VEBUS_ESS_SETPOINT_L1 = 37   # ESS power setpoint phase 1 (signed16, W, unit 227)
+    REG_VEBUS_ESS_SETPOINT_L2 = 40   # ESS power setpoint phase 2
+    REG_VEBUS_ESS_SETPOINT_L3 = 41   # ESS power setpoint phase 3
+
+    HUB4_MODE_OPTIMIZED   = 2      # GX styrer selv (med BatteryLife av for NMC)
+    HUB4_MODE_DISABLED    = 3      # ESS control disabled — vi tar over via VE.Bus reg 37
 
     # System unit (100) read-only registre
     REG_SOC               = 266    # Battery SOC (scale /10 → %)
@@ -142,93 +148,110 @@ class VictronModbus:
 
     def set_grid_setpoint(self, power_watts: int) -> bool:
         """
-        Sett grid power setpoint via 32-bit register 2716/2717 (Venus OS >= 3.50).
+        Sett ESS setpoint via VE.Bus reg 37 (Mode 3, direkte til MultiPlus).
+        Bypasser GX grid-meter loop som ellers overstyrer setpointet.
 
         Args:
             power_watts: Positiv = importer fra grid (lad batteri)
                          Negativ = eksporter til grid (utlad batteri)
-                         0 = la ESS styre selv
+                         0 = ingen setpoint
 
-        VIKTIG: Må kalles minst hvert 60. sekund for å holde setpointet aktivt.
-        Kilde: https://www.victronenergy.com/live/ess:ess_mode_2_and_3
+        VIKTIG: Må kalles minst hvert 10. sekund. Multi resetter setpoint etter ~10s.
+        Hub4Mode må være 3 (ESS Control Disabled) for full effekt.
         """
         if self.readonly:
-            logger.warning(f"🔒 READONLY_MODE: blokkerte grid setpoint {power_watts}W")
+            logger.warning(f"🔒 READONLY_MODE: blokkerte ESS setpoint {power_watts}W")
             return False
-        # 32-bit signed → to 16-bit registre (big-endian)
         w = int(power_watts)
-        # Konverter til unsigned 32-bit
-        if w < 0:
-            w_unsigned = w + (1 << 32)
-        else:
-            w_unsigned = w
-        hi = (w_unsigned >> 16) & 0xFFFF
-        lo = w_unsigned & 0xFFFF
-
+        # signed16 → uint16 (range -32768 til 32767 W per fase)
+        if w > 32767: w = 32767
+        if w < -32768: w = -32768
+        val = w + 65536 if w < 0 else w
         try:
-            result = self.client.write_registers(
-                address=self.REG_GRID_SETPOINT_LO,
-                values=[lo, hi],
-                device_id=self.UNIT_SYSTEM
+            result = self.client.write_register(
+                address=self.REG_VEBUS_ESS_SETPOINT_L1,
+                value=val,
+                device_id=self.UNIT_VEBUS
             )
             if result.isError():
-                logger.error(f"Modbus write error reg 2716/2717: {result}")
+                logger.error(f"Modbus write error reg 37 (VE.Bus): {result}")
                 return False
-            self._last_setpoint = int(power_watts)
-            action = "import" if power_watts > 0 else "export" if power_watts < 0 else "idle"
-            logger.info(f"Grid setpoint: {power_watts}W ({action})")
+            self._last_setpoint = w
+            action = "import" if w > 0 else "export" if w < 0 else "idle"
+            logger.info(f"ESS setpoint (reg37 VE.Bus): {w}W ({action})")
             return True
         except Exception as e:
             logger.exception("set_grid_setpoint feilet")
             return False
 
+    def _ensure_external_control(self) -> None:
+        """Bytt Hub4Mode til 3 (ESS Control Disabled) før vi setter VE.Bus setpoint.
+        Det forhindrer at GX-enheten automatisk overstyrer setpointet basert
+        på grid-meter (VM-3P75CT) som ellers oppdaterer hvert sekund."""
+        if self.readonly:
+            return
+        try:
+            r = self.client.read_holding_registers(
+                address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
+            if r and not r.isError() and r.registers[0] != self.HUB4_MODE_DISABLED:
+                self.client.write_register(
+                    address=self.REG_HUB4_MODE, value=self.HUB4_MODE_DISABLED,
+                    device_id=self.UNIT_SYSTEM)
+                logger.info("Bytter Hub4Mode → 3 (ESS Control Disabled)")
+        except Exception:
+            logger.exception("_ensure_external_control feilet")
+
     def set_charge_power(self, charge_kw: float) -> bool:
-        """Sett ladefart i kW."""
+        """Sett ladefart i kW. Bytter til Mode 4 (External Control) automatisk."""
+        self._ensure_external_control()
         watts = int(charge_kw * 1000)
         return self.set_grid_setpoint(watts)
 
     def set_discharge_power(self, discharge_kw: float) -> bool:
-        """Sett utladefart i kW."""
+        """Sett utladefart i kW. Bytter til Mode 4 (External Control) automatisk."""
+        self._ensure_external_control()
         watts = -int(discharge_kw * 1000)
         return self.set_grid_setpoint(watts)
 
     def enable_external_control(self) -> bool:
-        """Sett ESS Mode 4 (External Control) — nødvendig for full Modbus-styring."""
+        """Sett Hub4Mode=3 (ESS Control Disabled) for full kontroll via reg 37."""
         if self.readonly:
             return False
         try:
             r = self.client.write_register(
-                address=self.REG_ESS_MODE, value=self.ESS_MODE_EXTERNAL,
+                address=self.REG_HUB4_MODE, value=self.HUB4_MODE_DISABLED,
                 device_id=self.UNIT_SYSTEM)
             if not r.isError():
-                logger.info("ESS satt til External Control (modus 4)")
+                logger.info("Hub4Mode = 3 (ESS Control Disabled)")
                 return True
-            logger.error(f"enable_external_control feilet: {r}")
-        except Exception as e:
+        except Exception:
             logger.exception("enable_external_control feilet")
         return False
 
     def disable_external_control(self) -> bool:
-        """Tilbake til ESS Optimized without BatteryLife (modus 2)."""
+        """Tilbake til Hub4Mode=2 (Optimized without BatteryLife) for NMC."""
         if self.readonly:
             return False
         try:
-            self.set_grid_setpoint(-50)  # ESS default setpoint
+            # Reset VE.Bus setpoint først
+            self.client.write_register(
+                address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
+                device_id=self.UNIT_VEBUS)
             r = self.client.write_register(
-                address=self.REG_ESS_MODE, value=self.ESS_MODE_OPTIMIZED,
+                address=self.REG_HUB4_MODE, value=self.HUB4_MODE_OPTIMIZED,
                 device_id=self.UNIT_SYSTEM)
             if not r.isError():
-                logger.info("ESS tilbake til Optimized (modus 2)")
+                logger.info("Hub4Mode = 2 (Optimized) — GX overtar styring")
                 return True
-        except Exception as e:
+        except Exception:
             logger.exception("disable_external_control feilet")
         return False
 
     def get_ess_mode(self) -> Optional[int]:
-        """Les nåværende ESS-modus (reg 2902)."""
+        """Les nåværende Hub4Mode (reg 2902)."""
         try:
             r = self.client.read_holding_registers(
-                address=self.REG_ESS_MODE, count=1, device_id=self.UNIT_SYSTEM)
+                address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
             if r and not r.isError():
                 return r.registers[0]
         except Exception:
@@ -251,16 +274,36 @@ class VictronModbus:
         return False
 
     def stop_ess_control(self) -> bool:
-        """Returner kontroll til intern ESS (setpoint = 0)."""
+        """Returner kontroll til GX/ESS Optimized — NMC-vennlig idle.
+        Bytter Hub4Mode tilbake til 2 (Optimized without BatteryLife)."""
         self._last_setpoint = 0
-        return self.set_grid_setpoint(0)
+        if not self.readonly:
+            try:
+                # Nullstill VE.Bus setpoint
+                self.client.write_register(
+                    address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
+                    device_id=self.UNIT_VEBUS)
+                # Bytt Hub4Mode tilbake til 2
+                r = self.client.read_holding_registers(
+                    address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
+                if r and not r.isError() and r.registers[0] != self.HUB4_MODE_OPTIMIZED:
+                    self.client.write_register(
+                        address=self.REG_HUB4_MODE, value=self.HUB4_MODE_OPTIMIZED,
+                        device_id=self.UNIT_SYSTEM)
+                    logger.info("Hub4Mode → 2 (idle, GX overtar)")
+            except Exception:
+                pass
+        return True
 
     def send_keepalive(self) -> bool:
         """
-        Gjenta siste setpoint for å hindre at Victron nullstiller ESS-kontroll.
-        Victron krever skriving minst hvert 60s — vi sender hvert 30s.
+        Gjenta siste setpoint på reg 37 (VE.Bus). Mode 3 krever skriving
+        minst hvert 10. sekund — ellers nullstilles setpointet av Multi.
         """
-        return self.set_grid_setpoint(getattr(self, '_last_setpoint', 0))
+        last = getattr(self, '_last_setpoint', 0)
+        if last == 0:
+            return True  # ingen aktiv setpoint, ikke nodvendig
+        return self.set_grid_setpoint(last)
 
     def set_max_charge_current(self, amps: int) -> bool:
         """DVCC max charge current. -1 = ingen grense. (Register 2705)"""
