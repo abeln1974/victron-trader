@@ -24,13 +24,14 @@ services:
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
       
-      # Battery (Abelgard: 48kWh, 10kW max)
+      # Battery (Abelgard: 4x12kWh=48kWh NMC, 10kW max)
+      # NMC: hold 20-90% for lang levetid (unngå langvarig >90% og <20%)
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
       - BATTERY_MAX_CHARGE_KW=${BATTERY_MAX_CHARGE_KW:-10}
       - BATTERY_MAX_DISCHARGE_KW=${BATTERY_MAX_DISCHARGE_KW:-10}
       - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
-      - MIN_SOC=${MIN_SOC:-50}
-      - MAX_SOC=${MAX_SOC:-95}
+      - MIN_SOC=${MIN_SOC:-20}
+      - MAX_SOC=${MAX_SOC:-90}
       
       # Strategy
       - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-0.30}
@@ -80,8 +81,8 @@ services:
       - VAT=${VAT:-1.25}
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
       - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
-      - MIN_SOC=${MIN_SOC:-50}
-      - MAX_SOC=${MAX_SOC:-95}
+      - MIN_SOC=${MIN_SOC:-20}
+      - MAX_SOC=${MAX_SOC:-90}
       - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}

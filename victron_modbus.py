@@ -52,6 +52,7 @@ class VictronModbus:
     REG_GRID_SETPOINT_LO  = 2716   # AC grid setpoint 32-bit low word (hub4, volatile, W)
     REG_GRID_SETPOINT_HI  = 2717   # AC grid setpoint 32-bit high word
     REG_ESS_MODE          = 2902   # ESS Mode: 1=Opt+BL, 2=Opt, 3=KeepCharged, 4=ExternalControl
+    REG_ESS_MIN_SOC       = 2901   # ESS Minimum SoC (scale x10, eks 200 = 20%)
     REG_MAX_CHARGE_AMP    = 2705   # DVCC max charge current (A, -1=ingen grense)
     REG_MAX_DISCHARGE_W   = 2704   # Max inverter/discharge power (W, -1=ingen grense)
 
@@ -233,6 +234,21 @@ class VictronModbus:
         except Exception:
             pass
         return None
+
+    def set_min_soc(self, soc_pct: float) -> bool:
+        """Sett ESS minimum SOC (reg 2901, scale x10). F.eks. 20.0 → skriver 200."""
+        if self.readonly:
+            return False
+        try:
+            val = int(soc_pct * 10)
+            r = self.client.write_register(
+                address=self.REG_ESS_MIN_SOC, value=val, device_id=self.UNIT_SYSTEM)
+            if not r.isError():
+                logger.info(f"ESS min SOC satt til {soc_pct:.0f}%")
+                return True
+        except Exception:
+            logger.exception("set_min_soc feilet")
+        return False
 
     def stop_ess_control(self) -> bool:
         """Returner kontroll til intern ESS (setpoint = 0)."""

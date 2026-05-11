@@ -45,12 +45,17 @@ class EnergyTrader:
         logger.info(f"Connected via Modbus-TCP. Reading SOC...")
         time.sleep(1)
 
-        # Aktiver External Control (ESS modus 4) for full Modbus-styring
-        if not self.victron.enable_external_control():
-            logger.warning("Kunne ikke sette ESS External Control — fortsetter i Optimized modus")
-        else:
-            time.sleep(2)
-            logger.info(f"ESS modus: {self.victron.get_ess_mode()} (4=ExternalControl)")
+        # Behold Optimized without BatteryLife (modus 2) — NMC-batteri tåler ikke
+        # langvarig fulladning. ESS styrer aktivt ned fra 100%. Vi bruker grid
+        # setpoint (reg2716) som overlay for peak-shaving og trading.
+        mode = self.victron.get_ess_mode()
+        logger.info(f"ESS modus: {mode} (2=Optimized, 4=ExternalControl)")
+        if mode != self.victron.ESS_MODE_OPTIMIZED:
+            logger.warning(f"ESS modus er {mode}, forventet 2 (Optimized without BatteryLife)")
+
+        # Sett min SOC — NMC: ikke utlad under 20%
+        self.victron.set_min_soc(CONFIG.min_soc)
+        logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}% (NMC 20-90%)")
 
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -223,9 +228,9 @@ class EnergyTrader:
         self.running = False
         logger.info("Stopping...")
         
-        # Tilbakestill ESS til Optimized og koble fra
+        # Nullstill setpoint og koble fra
         if hasattr(self.victron, '_connected') and self.victron._connected:
-            self.victron.disable_external_control()
+            self.victron.set_grid_setpoint(-50)  # ESS default grid setpoint
             time.sleep(1)
             self.victron.disconnect()
         
