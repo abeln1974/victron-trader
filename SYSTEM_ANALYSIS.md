@@ -53,7 +53,7 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 | Max SOC (kode) | 90 % | NMC levetid |
 | Brukbar kapasitet (20–90 %) | 31.9 kWh | 45.6 × 0.70 |
 | Peak-reserve | 5 kWh | Alltid tilgjengelig for peak-shaving |
-| Virkningsgrad | 0.95 | Round-trip |
+| Virkningsgrad | 0.95 | Round-trip tap — inkluderer IKKE batterislitasje |
 | Sol | 5 kW Fronius Primo | AC-koblet |
 
 ### ESS-styring via Modbus-TCP
@@ -163,7 +163,7 @@ kjøpspris < 65.3 øre
 
 ### Kapasitetsberegning
 ```python
-grid_without_evcs = grid_kw - evcs_kw          # Faktisk forbruk uten EVCS
+grid_without_evcs = grid_kw - evcs_kw
 available_kw = peak_limit(9.5) - grid_without_evcs
 amps = int(available_kw * 1000 / (phases * 230))
 amps = clamp(amps, min=6, max=16)
@@ -240,26 +240,103 @@ Peak-grensen overholdes.
 
 ---
 
-## 8. Kjente svakheter / forbedringspotensial
+## 8. Batterilevetid og lønnsomhet
 
-### 🟡 Medium prioritet
-1. **Negativ reell kjøpspris trigger ikke alltid lading** — ved høy Norgespris-støtte kan
-   reell kjøpspris bli negativ. `should_charge()` er profittpris-basert og lader ikke
-   aggressivt nok i disse timene. Vurder å legge til spesialhåndtering.
-2. **Ingen re-planlegging intratime** — hvis priser publiseres kl 13 oppdateres ikke planen
-   før neste time-syklus. Bør trigge re-plan ved prisoppdatering.
-3. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100` antar
-   lineær SOC. Bør hente direkte fra SmartShunt via Modbus for nøyaktighet.
-4. **EVCS støtter kun én lader** — to separate ladere håndteres ikke.
+### 8.1 Systembelastning (infrastruktur)
 
-### 🟢 Lav prioritet
-5. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
-6. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
-7. **Profitt-dashboard viser kun dagens handler** — ingen ukes/måneds-graf.
+Modbus, HA og SQLite-belastningen er godt innenfor hva komponentene tåler:
+
+| Komponent | Frekvens | Vurdering |
+|---|---|---|
+| Modbus-TCP mot Cerbo GX | ~25-30 kall/min | Trygt — Victron VRM poller like hyppig |
+| Qubino via HA REST | 1 kall / 30s | Svært forsiktig — ingen risiko |
+| SQLite skriving | 1/time + peak-events | Tåler dette i årevis |
+
+### 8.2 Batterislitasje — den reelle kostnaden
+
+`battery_efficiency=0.95` i koden dekker kun **round-trip tap** (varme).
+Den dekker **ikke** batterislitasje fra sykling.
+
+**Kostnad per syklus (Farco NMC 4×12.5kWh):**
+
+| Parameter | Verdi |
+|---|---|
+| Antatt batteriverdi | ~150 000 kr |
+| Antatt levetid (20–90% vindu) | ~3000 sykler |
+| Kostnad per ekvivalent syklus | 50 kr |
+| Brukbar energi per syklus | 31.9 kWh |
+| **Batterikostnad per kWh** | **~1.57 kr/kWh** |
+
+### 8.3 Arbitrasje — lønnsomhetsgrense
+
+For at arbitrasje skal være lønnsomt må spread dekke batterikostnad + round-trip tap:
+
+```
+Salgspris:          68.75 øre/kWh
+Round-trip tap 5%:  −3.44 øre/kWh
+Batterislitasje:  −157.0 øre/kWh
+─────────────────────────────────
+Minimum kjøpspris for lønnsomhet: 68.75 − 3.44 − 157.0 = negativt
+```
+
+**Konklusjon: Ren daglig arbitrasje (full syklus) er IKKE lønnsomt** med dagens
+salgspris på 68.75 øre. Batterislitasjen overstiger arbitrasje-gevinsten.
+
+Arbitrasje er kun lønnsomt ved **ekstreme prisforskjeller** — spot over ~200 øre
+på dagtid vs natt under 20 øre — og bør ikke kjøres daglig.
+
+### 8.4 Hva som faktisk er lønnsomt
+
+| Strategi | Batterislitasje | Gevinst | Vurdering |
+|---|---|---|---|
+| Peak-shaving | Minimal (liten energi, korte perioder) | 243.7 kr/mnd | ✅ Klart lønnsomt |
+| Sol-selvforbruk | Ingen (sol lader, batteri buffer) | Spart kjøpspris | ✅ Klart lønnsomt |
+| Selektiv arbitrasje (ekstreme dager) | Lav (sjelden) | Variabel | ✅ Lønnsomt ved stor spread |
+| Daglig full arbitrasje | Høy (365 sykler/år) | Lav | ❌ Ikke lønnsomt |
+
+### 8.5 Anbefalt konfigurasjon for batterilevetid
+
+`MIN_PRICE_DIFF_NOK=0.10` (10 øre) er for lavt — systemet trader for aggressivt.
+
+For å unngå destruktiv sykling bør arbitrasje kun trigge ved stor spread.
+Reell minimumsspread som dekker batterikostnad er ~90 øre, men dette er
+sjelden realistisk. Anbefalt tilnærming:
+
+- **Hev `MIN_PRICE_DIFF_NOK` til 0.50–0.80** for å begrense trading til ekstreme dager
+- La peak-shaving og sol-selvforbruk gjøre hoveddelen av jobben
+- Arbitrasje trigges automatisk ved virkelig store prisspreader (vinter-topper etc.)
+
+> **For Windsurf/AI-assistenter:**
+> Ikke senk `MIN_PRICE_DIFF_NOK` uten å vurdere batterislitasje.
+> Systemet er primært et peak-shaving- og sol-selvforbrukssystem.
+> Arbitrasje er sekundært og bør kun skje ved ekstreme priser.
 
 ---
 
-## 9. Filstruktur
+## 9. Kjente svakheter / forbedringspotensial
+
+### 🔴 Høy prioritet
+1. **`MIN_PRICE_DIFF_NOK` bør heves** — se seksjon 8.5. Default 0.10 kr fører til
+   daglig sykling som sliter batteriet uten tilstrekkelig gevinst.
+
+### 🟡 Medium prioritet
+2. **Negativ reell kjøpspris trigger ikke alltid lading** — ved høy Norgespris-støtte kan
+   reell kjøpspris bli negativ. `should_charge()` er profittpris-basert og lader ikke
+   aggressivt nok i disse timene. Vurder å legge til spesialhåndtering.
+3. **Ingen re-planlegging intratime** — hvis priser publiseres kl 13 oppdateres ikke planen
+   før neste time-syklus. Bør trigge re-plan ved prisoppdatering.
+4. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100` antar
+   lineær SOC. Bør hente direkte fra SmartShunt via Modbus for nøyaktighet.
+5. **EVCS støtter kun én lader** — to separate ladere håndteres ikke.
+
+### 🟢 Lav prioritet
+6. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
+7. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
+8. **Profitt-dashboard viser kun dagens handler** — ingen ukes/måneds-graf.
+
+---
+
+## 10. Filstruktur
 
 | Fil | Ansvar |
 |---|---|
@@ -278,10 +355,11 @@ Peak-grensen overholdes.
 > - Live grid-cap skjer i `main.py._execute_action()`, ikke i `optimizer.py`
 > - `optimizer.py` bruker statisk estimat (1.5 kW) for fremtidsplanlegging — dette er tilsiktet
 > - `_decide_action_tariff()` er fjernet (var dead code) — bruk `get_immediate_action()` → `optimize()`
+> - Systemet er primært peak-shaving/sol-selvforbruk — arbitrasje er sekundært (se seksjon 8)
 
 ---
 
-## 10. Konfigurasjon (miljøvariabler)
+## 11. Konfigurasjon (miljøvariabler)
 
 ```env
 # Victron
@@ -316,6 +394,9 @@ SELL_PRICE_ORE=75.00
 NET_SELL_BACK_ORE=6.25
 CAPACITY_CHARGE_NOK=662.50
 
+# Strategi
+MIN_PRICE_DIFF_NOK=0.50  # Anbefalt: 0.50-0.80 for å beskytte batterilevetid
+
 # Home Assistant
 HA_URL=https://homeassistant.abelgaard.no
 HA_TOKEN=<secret>
@@ -323,7 +404,7 @@ HA_TOKEN=<secret>
 
 ---
 
-## 11. Endringslogg (teknisk)
+## 12. Endringslogg (teknisk)
 
 | Dato | Endring |
 |---|---|
@@ -333,4 +414,5 @@ HA_TOKEN=<secret>
 | 2026-05-11 | Natt-lading cappet mot live grid/peak-limit i `_execute_action` |
 | 2026-05-11 | `optimizer.py`: statisk 1.5 kW nattforbruk-estimat for fremtidsplan |
 | 2026-05-11 | SQLite `datetime('now', 'localtime')` for korrekt Oslo-tid |
-| 2026-05-11 | `SYSTEM_ANALYSIS.md` oppdatert med seksjon 6.4 og Windsurf-notater |
+| 2026-05-11 | Seksjon 8: batterilevetid og lønnsomhetsanalyse lagt til |
+| 2026-05-11 | `MIN_PRICE_DIFF_NOK` anbefaling hevet til 0.50-0.80 |
