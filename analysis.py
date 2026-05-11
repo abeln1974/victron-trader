@@ -18,6 +18,38 @@ from tariff import (
 from config import CONFIG
 
 # ─────────────────────────────────────────────────────────
+# KOSTNADER - BATTERISLITASJE OG DRIFT
+# ─────────────────────────────────────────────────────────
+
+# Farco 12kWh NMC batteri (4 stk = 48kWh)
+# NMC-kjemi: typisk 2000-3000 sykluser til 80% kapasitet
+BATTERY_COST_NOK        = 120_000   # Estimert kostnad 4x Farco 12kWh (ca 30k/stk)
+BATTERY_CYCLES_LIFETIME = 2500      # Konservativt for NMC
+BATTERY_KWH_USABLE      = 48 * (0.95 - 0.50)  # 22.8 kWh brukbart per syklus
+
+# Kostnad per kWh gjennomstrømmet (sykluskostnad)
+# En "syklus" = lade 22.8 kWh inn og ut
+BATTERY_COST_PER_CYCLE  = BATTERY_COST_NOK / BATTERY_CYCLES_LIFETIME
+BATTERY_COST_PER_KWH    = BATTERY_COST_PER_CYCLE / BATTERY_KWH_USABLE  # kr/kWh
+
+# MultiPlus-II 48/5000 (2 stk)
+INVERTER_COST_NOK       = 30_000    # Estimert 2x MultiPlus-II
+INVERTER_LIFETIME_YEARS = 15        # Typisk levetid
+INVERTER_COST_YEARLY    = INVERTER_COST_NOK / INVERTER_LIFETIME_YEARS
+
+# Server/Raspberry Pi for trading-programmet
+SERVER_COST_NOK         = 1_500     # RPi5 eller lignende
+SERVER_LIFETIME_YEARS   = 5
+SERVER_POWER_W          = 10        # Watt i drift
+SERVER_KWH_YEARLY       = SERVER_POWER_W * 24 * 365 / 1000
+# Strøm til server (reell kostnad etter Norgespris, ca 0.50 kr/kWh snitt)
+SERVER_POWER_COST_YEARLY = SERVER_KWH_YEARLY * 0.50
+SERVER_FIXED_COST_YEARLY = SERVER_COST_NOK / SERVER_LIFETIME_YEARS + SERVER_POWER_COST_YEARLY
+
+# Vedlikehold (BMS-sjekk, tilkoblinger, etc.)
+MAINTENANCE_YEARLY_NOK  = 500       # Konservativt estimat
+
+# ─────────────────────────────────────────────────────────
 # DINE TALL (fra april 2026-faktura)
 # ─────────────────────────────────────────────────────────
 MONTHLY_CONSUMPTION_KWH = 1761.84    # kWh/mnd totalt forbruk
@@ -274,24 +306,71 @@ SESONGVARIASJON (estimert):
         total_year += gain
     print(f"  {'TOTAL':>4} {total_year:>7.0f} kr/år")
 
-    # ── Konklusjon ──
+    # ── Full kostnadsanalyse ──
+    arb_kwh_yearly = arb['kwh_cycled_monthly'] * 12
+    battery_wear_yearly = arb_kwh_yearly * BATTERY_COST_PER_KWH
+
+    total_costs_yearly = (
+        battery_wear_yearly +
+        INVERTER_COST_YEARLY +
+        SERVER_FIXED_COST_YEARLY +
+        MAINTENANCE_YEARLY_NOK
+    )
+    gross_yearly = combined['annual_total_nok']
+    net_yearly   = gross_yearly - total_costs_yearly
+
     print(f"""
 ═════════════════════════════════════════════════════════════
-KONKLUSJON
+FULL KOSTNADSANALYSE (inkl. slitasje og drift)
 ═════════════════════════════════════════════════════════════
 
-  Konservativt (arbitrasje alene):   {arb['annual_gain_nok']:.0f} kr/år
-  Med peak-shaving:                  {combined['annual_total_nok']:.0f} kr/år
-  Sesongbasert estimat:              {total_year:.0f} kr/år
+  INNTEKTER (brutto):
+  ├─ Arbitrasje:                  {arb['annual_gain_nok']:>8.0f} kr/år
+  └─ Peak-shaving:                {peak['annual_saving_nok']:>8.0f} kr/år
+     ────────────────────────────────────────
+     Brutto gevinst:              {gross_yearly:>8.0f} kr/år
 
-  Nøkkelinnsikter:
-  • Norgespris-støtten ({NORGES_PRICE_ORE} øre/kWh) gjør natt-lading ekstremt billig
-  • Reell innkjøpspris om natten: {buy_price_ore(30, 3):.1f} øre/kWh (NESTEN GRATIS!)
-  • Peak-shaving fra 12.69→10 kW sparer {peak['monthly_saving_nok']:.0f} kr/mnd garantert
-  • Batteri er allerede betalt - ALLE inntekter er netto gevinst
+  KOSTNADER:
+  ├─ Batterislitasje (NMC):
+  │    Innkjøpspris batteri:      {BATTERY_COST_NOK:>8.0f} kr
+  │    Levetid sykluser:          {BATTERY_CYCLES_LIFETIME:>8} sykluser
+  │    Kostnad per syklus:        {BATTERY_COST_PER_CYCLE:>8.1f} kr
+  │    Kostnad per kWh syklet:    {BATTERY_COST_PER_KWH*100:>8.2f} øre/kWh
+  │    kWh syklet per år:         {arb_kwh_yearly:>8.0f} kWh
+  │  → Batterislitasje/år:        {battery_wear_yearly:>8.0f} kr/år
+  │
+  ├─ Inverter (2× MultiPlus-II):
+  │    Kostnad: {INVERTER_COST_NOK:,} kr / {INVERTER_LIFETIME_YEARS} år
+  │  → Avskrivning/år:            {INVERTER_COST_YEARLY:>8.0f} kr/år
+  │
+  ├─ Server (RPi):
+  │    {SERVER_POWER_W}W × 24t × 365 = {SERVER_KWH_YEARLY:.0f} kWh/år strøm
+  │    + avskrivning hardware
+  │  → Server totalt/år:          {SERVER_FIXED_COST_YEARLY:>8.0f} kr/år
+  │
+  └─ Vedlikehold (BMS, kabler):   {MAINTENANCE_YEARLY_NOK:>8.0f} kr/år
+     ────────────────────────────────────────
+     Total kostnad/år:            {total_costs_yearly:>8.0f} kr/år
 
-  Neste steg: Koble til Cerbo GX (VICTRON_HOST=din.cerbo.ip)
-              og start live-handel!
+  NETTO LØNNSOMHET:
+  ┌─────────────────────────────────────────
+  │  Brutto:     {gross_yearly:>8.0f} kr/år
+  │  Kostnader: -{total_costs_yearly:>7.0f} kr/år
+  │  ═══════════════════════════════
+  │  NETTO:      {net_yearly:>8.0f} kr/år  ({net_yearly/12:.0f} kr/mnd)
+  └─────────────────────────────────────────
+
+  VIKTIG OM BATTERISLITASJE:
+  • Batteriet er allerede kjøpt og installert
+  • Slitasjekostnaden er en MULIGHETSKOSTAND
+    (batteriet slites uansett over tid, men trading øker sykluser)
+  • Med 0.8 sykluser/dag = {0.8*365:.0f} sykluser/år → batteri holder {BATTERY_CYCLES_LIFETIME/(0.8*365):.1f} år
+  • Uten trading (kun solenergy buffer): ~{BATTERY_CYCLES_LIFETIME/(0.3*365):.1f} år
+  • Ekstra slitasje pga trading: ~{(BATTERY_CYCLES_LIFETIME/(0.8*365) - BATTERY_CYCLES_LIFETIME/(0.3*365)):.1f} år kortere levetid
+
+  KONKLUSJON:
+  {'✅ LØNNSOMT' if net_yearly > 0 else '❌ ULØNNSOMT'} selv med alle kostnader inkludert
+  Netto gevinst: {net_yearly:.0f} kr/år = {net_yearly/12:.0f} kr/mnd
 ═════════════════════════════════════════════════════════════
 """)
 
