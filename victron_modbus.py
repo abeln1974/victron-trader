@@ -19,7 +19,10 @@ Read-only system-registre (Unit-ID 100):
 - Register 850: PV power (W)
 
 OPPSETT ABELGÅRD:
-- 2x MultiPlus-II 48/5000, Cerbo GX v3.72
+- 2x MultiPlus-II 48/5000/70-50 parallell, Cerbo GX v3.72 (192.168.1.60)
+- SmartShunt 500A: device_id=226, SOC på reg 266
+- VE.Bus: device_id=227, ESS reg 37
+- System (Cerbo): device_id=100, grid reg 820, PV reg 850, ESS setpoint reg 2716
 - ESS: Optimized without BatteryLife, min SOC 50%
 - Modbus-TCP aktiveres: Settings → Services → Modbus-TCP → Enabled
 
@@ -57,9 +60,10 @@ class VictronModbus:
     REG_GRID_L1           = 820    # Grid L1 power (W, signed)
     REG_PV_POWER          = 850    # PV / Solar charger power (W) - Fronius Primo
 
-    # Unit-ID for ESS kontroll og systemdata
-    UNIT_SYSTEM           = 100    # com.victronenergy.system (alle ESS-registre)
-    UNIT_BATTERY          = 226    # com.victronenergy.battery (SmartShunt 800Ah)
+    # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
+    UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS setpoint(2716/2700)
+    UNIT_BATTERY          = 226    # com.victronenergy.battery: SmartShunt 500A — SOC(266)
+    UNIT_VEBUS            = 227    # com.victronenergy.vebus: MultiPlus-II parallell — ESS reg37
     
     def __init__(self,
                  host: str = CONFIG.victron_host,
