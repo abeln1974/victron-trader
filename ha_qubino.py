@@ -32,12 +32,16 @@ HA_ENTITIES = {
 
 # Timeout for HA-kall — Z-Wave kan være treg
 HA_TIMEOUT = float(os.getenv("HA_TIMEOUT", "3.0"))
-# Max alder på data før vi anser Qubino som nede (sekunder)
-HA_MAX_AGE = int(os.getenv("HA_MAX_AGE", "60"))
+# Minimum sekunder mellom kall mot HA (unngå rate-limit/ban)
+HA_MIN_INTERVAL = float(os.getenv("HA_MIN_INTERVAL", "15.0"))
 
 
 class QubinoReader:
-    """Les Qubino 3-fase smartmåler fra Home Assistant."""
+    """Les Qubino 3-fase smartmåler fra Home Assistant.
+    
+    Bruker ET enkelt batch-kall til /api/states for alle entiteter
+    for å unngå rate-limiting/IP-ban fra HA.
+    """
 
     def __init__(self):
         self.ha_url   = os.getenv("HA_URL",   _HA_URL_DEFAULT)
@@ -47,44 +51,70 @@ class QubinoReader:
             "Authorization": f"Bearer {self.ha_token}",
             "Content-Type": "application/json",
         })
+        self._cache: dict = {}          # entity_id → state-verdi
+        self._last_fetch: float = 0.0   # tidspunkt for siste batch-henting
         if not self.ha_token:
             logger.warning("HA_TOKEN ikke satt — Qubino vil ikke fungere")
 
-    def _get_state(self, entity_id: str, as_str: bool = False):
-        """Hent en enkelt entity-verdi fra HA. as_str=True returnerer rå streng."""
-        if not entity_id:
-            return None
+    def _fetch_all(self) -> bool:
+        """
+        Hent alle Qubino-entiteter i ETT HTTP-kall via /api/states.
+        Filtrer lokalt på entity_id — unngår mange separate kall og IP-ban.
+        Respekterer HA_MIN_INTERVAL for å unngå rate-limiting.
+        """
+        import time, json
+        now = time.monotonic()
+        if now - self._last_fetch < HA_MIN_INTERVAL:
+            return True  # Bruk eksisterende cache
+
+        wanted = set(HA_ENTITIES.values())
         try:
             r = self._session.get(
-                f"{self.ha_url}/api/states/{entity_id}",
+                f"{self.ha_url}/api/states",
                 timeout=HA_TIMEOUT
             )
             if r.status_code == 200:
-                data = r.json()
-                state = data.get("state", "unavailable")
-                if state in ("unavailable", "unknown", ""):
-                    return None
-                if as_str:
-                    return state
-                return float(state)
-            elif r.status_code == 404:
-                logger.debug(f"HA entity ikke funnet: {entity_id}")
+                all_states = r.json()
+                self._cache = {
+                    s["entity_id"]: s["state"]
+                    for s in all_states
+                    if s["entity_id"] in wanted
+                }
+                self._last_fetch = now
+                logger.debug(f"Qubino batch-fetch OK: {len(self._cache)}/{len(wanted)} entiteter")
+                return True
             else:
-                logger.warning(f"HA API {r.status_code} for {entity_id}")
+                logger.warning(f"HA /api/states {r.status_code}: {r.text[:80]}")
         except requests.Timeout:
-            logger.debug(f"HA timeout for {entity_id}")
-        except (ValueError, KeyError):
-            pass
+            logger.warning("HA batch-fetch timeout")
         except Exception as e:
-            logger.debug(f"HA feil for {entity_id}: {e}")
-        return None
+            logger.warning(f"HA batch-fetch feil: {e}")
+        return False
+
+    def _get_state(self, entity_id: str, as_str: bool = False):
+        """Hent entity-verdi fra cache (populert av _fetch_all)."""
+        if not entity_id:
+            return None
+        state = self._cache.get(entity_id)
+        if state is None or state in ("unavailable", "unknown", ""):
+            return None
+        if as_str:
+            return state
+        try:
+            return float(state)
+        except (ValueError, TypeError):
+            return None
 
     def get_grid_power(self) -> Optional[Dict]:
         """
         Hent grid-effekt fra alle 3 faser.
 
         Returnerer dict med l1/l2/l3/total, eller None hvis Qubino er nede.
+        ETT HTTP-kall per HA_MIN_INTERVAL sekunder (standard 15s).
         """
+        if not self._fetch_all():
+            return None
+
         # Sjekk Z-Wave node-status (alive/dead) — ikke blokker på dead, bare logg
         if "status" in HA_ENTITIES:
             status = self._get_state(HA_ENTITIES["status"], as_str=True)
@@ -111,7 +141,8 @@ class QubinoReader:
         return {"l1": l1, "l2": l2, "l3": l3, "total": total, "source": "qubino"}
 
     def get_voltages(self) -> Optional[Dict]:
-        """Hent spenning på alle 3 faser."""
+        """Hent spenning på alle 3 faser (bruker eksisterende cache)."""
+        self._fetch_all()  # Bruker cache hvis nylig hentet
         v1 = self._get_state(HA_ENTITIES["voltage_l1"])
         v2 = self._get_state(HA_ENTITIES["voltage_l2"])
         v3 = self._get_state(HA_ENTITIES["voltage_l3"])
