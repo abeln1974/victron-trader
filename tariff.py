@@ -33,6 +33,7 @@ KAPASITETSLEDD (Elvia 2026) — kW-basert, inkl MVA:
 """
 import os
 from datetime import datetime
+from typing import List, Tuple
 from config import CONFIG
 
 # Konstanter — Elvia 2026 + Kraftriket (alle eks mva)
@@ -144,7 +145,10 @@ def should_discharge(spot_ore: float, hour: int) -> bool:
     """
     current_buy = buy_price_ore(spot_ore, hour)
     # Utlading sparer oss for å kjøpe fra grid
-    return current_buy > sell_price_ore()
+    # Men kun hvis spread > min_price_diff_nok
+    spread = current_buy - sell_price_ore()
+    min_spread_ore = CONFIG.min_price_diff_nok * 100  # Convert kr to øre
+    return spread > min_spread_ore
 
 
 def format_prices(spot_ore: float, hour: int) -> str:

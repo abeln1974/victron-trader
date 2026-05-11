@@ -94,17 +94,17 @@ class Optimizer:
                       for p in prices]
         sell_ore = sell_price_ore()
 
-        # --- Finn de beste utlade-timene (høyeste kjøpspris = mest spart) ---
-        # Kun timer der kjøpspris > salgspris (ellers er det ikke lønnsomt)
+        # --- Finn de beste utlade-timene (bruk should_discharge logikk) ---
         profitable_hours = set()
         discharge_candidates = sorted(
-            [(i, bp) for i, bp in enumerate(buy_prices) if bp > sell_ore],
-            key=lambda x: -x[1]  # Sorter etter høyeste pris
+            [(i, p) for i, p in enumerate(prices) 
+             if should_discharge(p.price_ore_kwh / CONFIG.vat, p.timestamp.hour)],
+            key=lambda x: -x[1].price_ore_kwh  # Sorter etter høyeste pris
         )
         # Beregn where vi kan utlade med tilgjengelig kapasitet
         usable_kwh = self.capacity * (current_soc - self.min_soc) / 100 - self.peak_reserve
         remaining_kwh = max(0, usable_kwh)
-        for idx, bp in discharge_candidates:
+        for idx, price_point in discharge_candidates:
             if remaining_kwh <= 0:
                 break
             profitable_hours.add(idx)
