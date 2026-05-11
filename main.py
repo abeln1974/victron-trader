@@ -226,19 +226,40 @@ class EnergyTrader:
                 return
 
             grid_kw = grid_w / 1000.0
+            peak_kw = self.optimizer.peak_limit_kw
 
-            if grid_kw <= 0:
+            if grid_kw <= peak_kw:
                 return
 
-            action = self.optimizer.peak_shave(grid_kw, soc)
-            if action:
-                logger.warning(
-                    f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > "
-                    f"{self.optimizer.peak_limit_kw}kW. "
-                    f"Utlader {abs(action.power_kw):.1f}kW fra batteri."
-                )
-                self.victron.set_discharge_power(abs(action.power_kw))
-                self.current_action = action
+            # Grid over grensen — er vi i ferd med å lade?
+            if (self.current_action and self.current_action.action == 'charge'):
+                # Reduser ladeeffekt slik at grid holder seg under peak
+                charge_kw = self.current_action.power_kw
+                other_load_kw = grid_kw - charge_kw  # forbruk utenom lading
+                new_charge_kw = max(0.0, peak_kw - other_load_kw)
+                if new_charge_kw < 0.5:
+                    logger.warning(
+                        f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW — stopper lading"
+                    )
+                    self.victron.stop_ess_control()
+                    self.current_action = None
+                else:
+                    logger.warning(
+                        f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW — "
+                        f"reduserer lading {charge_kw:.1f}kW → {new_charge_kw:.1f}kW"
+                    )
+                    self.victron.set_charge_power(new_charge_kw)
+                    self.current_action.power_kw = new_charge_kw
+            else:
+                # Ikke lading — utlad for å dekke toppen
+                action = self.optimizer.peak_shave(grid_kw, soc)
+                if action:
+                    logger.warning(
+                        f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW — "
+                        f"utlader {abs(action.power_kw):.1f}kW fra batteri."
+                    )
+                    self.victron.set_discharge_power(abs(action.power_kw))
+                    self.current_action = action
         except Exception as e:
             logger.debug(f"Peak-shave sjekk feilet: {e}")
 
