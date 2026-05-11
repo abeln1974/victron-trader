@@ -103,7 +103,7 @@ def api_status():
     hour_now = datetime.now(OSLO_TZ).hour
     buy_ore = buy_price_ore(spot_ore, hour_now) if current else 0
     sell_ore = sell_price_ore(spot_ore)
-    discharge_margin = round(buy_ore - sell_ore, 1)
+    discharge_margin = round(sell_ore - buy_ore, 1)  # Positivt = lønnsomt å selge
 
     return jsonify({
         "timestamp": datetime.now(OSLO_TZ).isoformat(),
@@ -403,7 +403,7 @@ async function fetchStatus() {
   } else if (margin >= 0) {
     marginStatus.innerHTML = '<span class="badge badge-yellow">⚠ Marginal</span>';
   } else {
-    marginStatus.innerHTML = '<span class="badge badge-blue">🔋 Lønnsomt å lade</span>';
+    marginStatus.innerHTML = '<span class="badge badge-red">🔋 Lønnsomt å lade</span>';
   }
 
   document.getElementById('todayProfit').textContent = d.profit.today_nok.toFixed(2) + ' kr';
@@ -412,7 +412,7 @@ async function fetchStatus() {
   document.getElementById('todaySold').textContent = d.profit.today_sold_kwh + ' kWh';
 
   const dm = d.price.discharge_margin_ore;
-  const dmColor = dm >= 10 ? '#22c55e' : dm >= 0 ? '#facc15' : '#ef4444';
+  const dmColor = dm >= 10 ? '#22c55e' : dm >= 0 ? '#facc15' : '#60a5fa';
   document.getElementById('statusBar').innerHTML =
     `<strong>Status:</strong> Live &nbsp;|&nbsp;
      <strong>Spot:</strong> ${d.price.spot_ore} øre &nbsp;|&nbsp;

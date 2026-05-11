@@ -128,12 +128,12 @@ def should_discharge(spot_ore: float, hour: int) -> bool:
     """
     Skal vi utlade batteriet nå?
 
-    Sammenlign reell kjøpspris (fastpris + nettleie + avgifter inkl mva − Norgespris)
-    mot salgspris (spot eks mva). Hvis kjøpspris > salgspris + terskel → lønnsomt å selge.
+    Sammenlign salgspris (spot eks mva) mot reell kjøpspris (fastpris + avgifter inkl mva).
+    Lønnsomt å selge når salgspris > kjøpspris + terskel.
     """
     buy = buy_price_ore(spot_ore, hour)
     sell = sell_price_ore(spot_ore)
-    spread = buy - sell
+    spread = sell - buy  # Positivt når salg > kjøp
     min_spread_ore = CONFIG.min_price_diff_nok * 100
     return spread > min_spread_ore
 
