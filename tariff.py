@@ -1,6 +1,6 @@
 """Beregning av reell kjøps- og salgspris for Abelgard.
 
-Basert på Elvia Nettleiepriser 2026 og Kraftriket Solstrøm:
+Basert på Elvia Nettleiepriser 2026 og Kraftriket (kraftriket.no):
 
 KJØP (per kWh inkl mva):
   Spotpris           (variabel, eks mva)
