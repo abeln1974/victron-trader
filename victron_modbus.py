@@ -58,8 +58,9 @@ class VictronModbus:
     # System unit (100) read-only registre
     REG_SOC               = 266    # Battery SOC (scale /10 → %)
     REG_GRID_L1           = 820    # Grid L1 power (W, signed)
+    REG_GRID_L2           = 821    # Grid L2 power (W, signed)
+    REG_GRID_L3           = 822    # Grid L3 power (W, signed) — 0W på IT-nett!
     REG_PV_POWER          = 808    # AC-coupled PV on AC output L1 (W) - Fronius Primo 5kW
-    #                      850    # AC-coupled PV on output (alternativ, gir 0 nå)
 
     # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
     UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS setpoint(2716/2700)
@@ -234,8 +235,55 @@ class VictronModbus:
         return None
 
     def get_grid_power(self) -> Optional[float]:
-        """Grid L1 power in Watt. Register 820, signed. (Unit 100)"""
-        return self._read_signed16(self.REG_GRID_L1)
+        """
+        Total grid-effekt for Abelgård 3-fase IT-nett.
+
+        VM-3P75CT måler L1 og L2 korrekt, men L3 viser 0W selv om det går strøm der.
+        Dette er en kjent begrensning med VM-3P75CT i 3-fase IT-nett (230V L-N).
+        Reell grid = L1 + L2 + L3(målt=0 pga IT-nett) = L1 + L2.
+        For nøyaktig total anbefales energibalanse via get_power_balance().
+        """
+        l1 = self._read_signed16(self.REG_GRID_L1)
+        l2 = self._read_signed16(self.REG_GRID_L2)
+        if l1 is not None and l2 is not None:
+            return l1 + l2
+        return l1
+
+    def get_grid_phases(self) -> dict:
+        """Les alle tre faser (L3 = 0W pga IT-nett målerbegrensning)."""
+        return {
+            "l1": self._read_signed16(self.REG_GRID_L1),
+            "l2": self._read_signed16(self.REG_GRID_L2),
+            "l3": self._read_signed16(self.REG_GRID_L3),
+        }
+
+    def get_power_balance(self) -> dict:
+        """
+        Energibalanse for å kompensere for manglende L3-måling.
+
+        Kirchhoffs lov for AC-nett:
+          Sol (Fronius) + Grid (inn) = Forbruk + Batteri (inn)
+          => Grid_reell = Batteri_effekt + Forbruk - Sol
+
+        Alternativt: vi kan beregne antatt L3 fra batteri+sol-balansen.
+        Batteri-effekt fra SmartShunt er alltid korrekt (måler DC-siden).
+        """
+        l1  = self._read_signed16(self.REG_GRID_L1) or 0
+        l2  = self._read_signed16(self.REG_GRID_L2) or 0
+        sol = self._read_signed16(self.REG_PV_POWER) or 0
+        bat = self._read_signed16(842) or 0   # reg 842 = batteri DC-effekt
+
+        grid_measured = l1 + l2           # Hva måleren ser (mangler L3)
+        # Balanse: alt målt fra DC-siden er korrekt
+        # Positiv bat = lader (strøm INN i batteri fra grid/sol)
+        # Negativ bat = utlader
+        return {
+            "l1": l1, "l2": l2, "l3_measured": 0,
+            "grid_measured_w": grid_measured,
+            "solar_w": sol,
+            "battery_w": bat,
+            "note": "L3=0W: VM-3P75CT måler ikke L3 i 3-fase IT-nett"
+        }
 
 
     def get_solar_power(self) -> Optional[float]:

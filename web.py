@@ -20,31 +20,53 @@ _price_lock = threading.Lock()
 
 # Cache live Cerbo GX data (polles hvert 10s i bakgrunn)
 _live_cache = {
-    "soc": None, "grid_w": None, "solar_w": None,
-    "battery_w": None, "updated": None, "error": None
+    "soc": None, "grid_w": None, "grid_l1": None, "grid_l2": None, "grid_l3": None,
+    "grid_source": None,  # 'qubino' eller 'modbus'
+    "solar_w": None, "battery_w": None, "updated": None, "error": None
 }
 _live_lock = threading.Lock()
 
 def _poll_cerbo():
-    """Bakgrunnstråd: les Cerbo GX via Modbus hvert 10s."""
+    """Bakgrunnstråd: les Cerbo GX via Modbus + Qubino via HA hvert 10s."""
+    import time
     from victron_modbus import VictronModbus
+    from ha_qubino import QubinoReader
     vic = VictronModbus()
+    qubino = QubinoReader()
     connected = False
     while True:
-        import time
         try:
             if not connected:
                 connected = vic.connect()
             if connected:
                 soc     = vic.get_soc()
-                grid_w  = vic.get_grid_power()
                 solar_w = vic.get_solar_power()
-                # Batteri-effekt: reg 842
                 bat_raw = vic._read_signed16(842)
+
+                # Grid: prøv Qubino først (alle 3 faser), fallback til VM-3P75CT
+                qpower = qubino.get_grid_power()
+                if qpower:
+                    grid_w  = qpower["total"]
+                    grid_l1 = qpower["l1"]
+                    grid_l2 = qpower["l2"]
+                    grid_l3 = qpower["l3"]
+                    grid_src = "qubino"
+                else:
+                    phases  = vic.get_grid_phases()
+                    grid_l1 = phases.get("l1")
+                    grid_l2 = phases.get("l2")
+                    grid_l3 = 0.0  # VM-3P75CT måler ikke L3 i IT-nett
+                    grid_w  = (grid_l1 or 0) + (grid_l2 or 0)
+                    grid_src = "modbus"
+
                 with _live_lock:
                     _live_cache.update({
-                        "soc": soc, "grid_w": grid_w,
-                        "solar_w": solar_w, "battery_w": bat_raw,
+                        "soc": soc,
+                        "grid_w": grid_w,
+                        "grid_l1": grid_l1, "grid_l2": grid_l2, "grid_l3": grid_l3,
+                        "grid_source": grid_src,
+                        "solar_w": solar_w,
+                        "battery_w": bat_raw,
                         "updated": datetime.now().isoformat(),
                         "error": None
                     })
@@ -273,9 +295,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">⚡ Nett (grid)</div>
+      <div class="card-title">⚡ Nett (L1+L2 målt)</div>
       <div class="card-value" id="liveGrid">—</div>
-      <div class="card-sub" id="liveGridSub">W fra nett</div>
+      <div class="card-sub" id="liveGridSub" style="line-height:1.6">
+        <span id="liveGridDir"></span> <span id="liveGridBadge"></span><br>
+        <span id="liveGridPhases" style="font-size:.72rem;color:#475569"></span>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">☀️ Sol (Fronius 5kW)</div>
@@ -583,7 +608,18 @@ async function fetchLive() {
     const gridEl = document.getElementById('liveGrid');
     gridEl.textContent = (gw >= 0 ? '+' : '') + Math.round(gw) + ' W';
     gridEl.style.color = gw > 500 ? '#ef4444' : gw < -100 ? '#22c55e' : '#94a3b8';
-    document.getElementById('liveGridSub').textContent = gw > 0 ? 'importerer fra nett' : gw < 0 ? 'eksporterer til nett' : 'nøytral';
+    const direction = gw > 50 ? 'importerer fra nett' : gw < -50 ? 'eksporterer til nett' : 'nøytral';
+    document.getElementById('liveGridDir').textContent = direction;
+    const src = d.grid_source || 'modbus';
+    const badge = document.getElementById('liveGridBadge');
+    badge.innerHTML = src === 'qubino'
+      ? '<span style="font-size:.68rem;background:#14532d;color:#22c55e;padding:.1rem .4rem;border-radius:4px">Qubino ✓</span>'
+      : '<span style="font-size:.68rem;background:#422006;color:#facc15;padding:.1rem .4rem;border-radius:4px">⚠ Modbus fallback (L3=0)</span>';
+    const l1 = d.grid_l1 ?? 0;
+    const l2 = d.grid_l2 ?? 0;
+    const l3 = d.grid_l3 ?? 0;
+    document.getElementById('liveGridPhases').textContent =
+      `L1: ${Math.round(l1)}W  L2: ${Math.round(l2)}W  L3: ${Math.round(l3)}W`;
 
     // Sol
     const sw = d.solar_w ?? 0;
