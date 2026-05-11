@@ -13,6 +13,7 @@ from optimizer import Optimizer, Action
 from victron_modbus import VictronModbus
 from profit_tracker import ProfitTracker
 from ha_qubino import QubinoReader, EVCSController
+from tariff import sell_price_ore, buy_price_ore
 
 logging.basicConfig(
     level=getattr(logging, CONFIG.log_level),
@@ -148,7 +149,12 @@ class EnergyTrader:
                     if actual_kwh > 0.05:
                         act = self.current_action.action
                         db_action = "sell" if act == "discharge" else "buy"
-                        self.tracker.log_trade(db_action, actual_kwh, self._last_price_nok)
+                        spot_eks_mva = self._last_price_nok / CONFIG.vat
+                        if db_action == "sell":
+                            price_nok = sell_price_ore(spot_eks_mva * 100) / 100
+                        else:
+                            price_nok = buy_price_ore(spot_eks_mva * 100, datetime.now(OSLO_TZ).hour) / 100
+                        self.tracker.log_trade(db_action, actual_kwh, price_nok)
                         logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh (SOC {self._action_start_soc:.1f}%->{end_soc:.1f}%)")
                 logger.info(f"Action fra time {action_hour:02d} utgatt (na {now.hour:02d}) -- stopper ESS")
                 self.victron.stop_ess_control()
