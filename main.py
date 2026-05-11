@@ -72,9 +72,11 @@ class EnergyTrader:
         last_hour = -1
         last_status_min = -1
         last_keepalive = 0.0  # Siste gang vi sendte ESS keepalive
+        last_peak_shave = 0.0  # Siste peak-shave sjekk
 
         while self.running:
             now = datetime.now()
+            current_time = time.time()
 
             # Kjør handelslogikk ved start av hver time
             if now.hour != last_hour:
@@ -82,21 +84,23 @@ class EnergyTrader:
                 self._execute_trade_cycle()
 
             # Peak-shaving: sjekk grid-effekt hvert 10. sekund
-            self._check_peak_shaving()
+            if current_time - last_peak_shave >= 10:
+                self._check_peak_shaving()
+                last_peak_shave = current_time
 
             # ESS keepalive: Mode 3 via VE.Bus reg 37 krever skriving hvert ~10s.
             # Vi sender hvert 3s for sikkerhet
             if self.current_action and self.current_action.action != 'idle':
-                if time.time() - last_keepalive >= 3:
+                if current_time - last_keepalive >= 3:
                     self.victron.send_keepalive()
-                    last_keepalive = time.time()
+                    last_keepalive = current_time
 
             # Log status hvert 5. minutt
             if now.minute % 5 == 0 and now.minute != last_status_min:
                 last_status_min = now.minute
                 self._log_status()
 
-            time.sleep(10)
+            time.sleep(3)
 
     def _execute_trade_cycle(self):
         """Execute one trading cycle."""
