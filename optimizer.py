@@ -23,19 +23,6 @@ from config import CONFIG, OSLO_TZ
 PEAK_SHAVING_LIMIT_KW    = float(9.5)  # Mål: hold under 10kW (buffer 0.5kW)
 PEAK_SHAVING_RESERVE_KWH = float(5.0)  # Hold alltid 5 kWh reservert til peak-shaving
 
-# Kapasitetstrinn inkl MVA (kr/mnd) — brukes til lønnsomhetsberegning
-ELVIA_CAPACITY_STEPS = [
-    (0,    1.99,  237.5),
-    (2,    4.99,  293.8),
-    (5,    9.99,  418.8),
-    (10,  14.99,  662.5),
-    (15,  19.99,  837.5),
-    (20,  24.99, 1075.0),
-    (25,  49.99, 1437.5),
-    (50,  74.99, 2375.0),
-    (75, 9999.0, 3000.0),
-]
-
 
 @dataclass
 class Action:
