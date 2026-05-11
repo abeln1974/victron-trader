@@ -1,7 +1,7 @@
 # Victron Energy Trader — Systemanalyse
 
-> Sist oppdatert: 2026-05-11  
-> Repository: `gitea.abelgaard.no/lars/victron-trader` (branch: master)  
+> Sist oppdatert: 2026-05-11
+> Repository: `gitea.abelgaard.no/lars/victron-trader` (branch: master)
 > Installasjon: Abelgård, Ringerike — NO1 prisområde
 
 ---
@@ -102,6 +102,12 @@ Kraftriket betaler:  75.00 øre/kWh
 - **Peak-shaving grense:** 9.5 kW (0.5 kW buffer til 10 kW-trinnet)
 - **Besparelse Trinn 4→3:** 662.5 − 418.8 = **243.7 kr/mnd**
 
+> **Merk — Norgespris i trading-beslutninger:**
+> `should_discharge()` ekskluderer Norgespris fra spread-beregningen (korrekt).
+> `buy_price_ore()` inkluderer Norgespris-fradraget (brukes til dashboard-visning).
+> Dashboardet kan derfor vise negativ "reell kjøpspris" og likevel trigge utlading —
+> dette er tilsiktet og matematisk riktig.
+
 ---
 
 ## 4. Optimaliseringsstrategi
@@ -123,6 +129,7 @@ råkjøpspris > salgspris × efficiency
 1. Etter utladingsplan er beregnet: estimér SOC etter planlagt utlading
 2. Finn billigste nattetimer (22–06) under lønnsomhetsterskel
 3. Tildel ladekapasitet opp til 90% SOC
+4. **Cap ladeeffekt mot peak-limit** — se seksjon 6.4
 
 **Lønnsomhetskrav lading:**
 ```
@@ -133,15 +140,15 @@ kjøpspris < 65.3 øre
 ### 4.3 Peak-shaving (kontinuerlig, hvert 10s)
 - Hvis grid > 9.5 kW → utlad fra batteri med `excess_kw`
 - Krever min 5 kWh reserve i batteriet
-- Prioritet over trading (krasjer ikke trading, men overstyrer setpoint midlertidig)
+- Prioritet over trading (overstyrer setpoint midlertidig)
 
 ---
 
 ## 5. EVCS Elbil-lader koordinering
 
 ### Anlegg
-- Victron EVCS (HQ2309VTVNF), **1-fase**, AC-input (grid-siden)
-- Min ladestrøm: 6A, Max konfigurerbar: 16A (= 3.7 kW)
+- Victron EVCS (HQ2309VTVNF), **1-fase** (`EVCS_PHASES=1`), AC-input (grid-siden)
+- Min ladestrøm: 6A, Max konfigurerbar: 16A (= 3.7 kW på 1 fase)
 - 2 Polestarer lader hjemme: Polestar 2 (2022) og Polestar 4 (2025)
 - Styres via Home Assistant REST API
 
@@ -166,22 +173,35 @@ amps = clamp(amps, min=6, max=16)
 
 ## 6. Sikkerhetsfunksjoner
 
-### Export-guard (keepalive-loop, hvert 3s)
+### 6.1 Export-guard (keepalive-loop, hvert 3s)
 - Under utlading: mål grid hvert 3s
 - Hvis `grid_w > −(discharge_w × 0.6)` → lokalt forbruk spiser for mye → **stopp utlading**
 - Eksempel: 10 kW utlading → grense = −6000W. Hvis grid > −6000W → stopp
 - Forhindrer at batteriet tapper seg uten å faktisk selge til nett
 
-### Action-time guard
+### 6.2 Action-time guard
 - Keepalive sendes **kun** hvis `action.timestamp.hour == now.hour`
 - Forhindrer at gammel action holder seg aktiv etter time-skifte
 - Ved time-skifte: logg faktisk kWh (SOC-endring × kapasitet), stopp ESS
 
-### Krasj-sikring
+### 6.3 Krasj-sikring
 - Startup-reset: alltid Hub4Mode=2 + reg37=0 ved oppstart
 - Docker `restart: unless-stopped` → gjenoppstart innen sekunder
 - MultiPlus hardware-timeout: nullstiller reg37 automatisk etter ~10s uten keepalive
 - `stop()` ved SIGTERM/SIGINT: rydder opp Hub4Mode og EVCS restore_auto()
+
+### 6.4 Peak-limit cap ved lading (main.py `_execute_action`)
+Lading kan overskride peak-grensen hvis husforbruket er høyt.
+`_execute_action` leser live grid-effekt og capper ladeeffekten:
+```python
+headroom_kw = max(0, peak_limit_kw - max(0, grid_kw))
+charge_kw = min(action.power_kw, headroom_kw)
+```
+- Hvis headroom < 0.5 kW → lading blokkeres helt
+- Logg viser cappet effekt og begrunnelse
+
+`optimizer.py` bruker også et statisk estimat (1.5 kW typisk nattforbruk) for å planlegge
+konservativt fremover, men `_execute_action` bruker alltid live grid for faktisk cap.
 
 ---
 
@@ -194,7 +214,7 @@ kl 19:00  discharge 10kW — EVCS stoppes umiddelbart
 kl 20:00  discharge 10kW — EVCS forblir stoppet
 kl 21:00  discharge 6kW  — EVCS forblir stoppet
 kl 22:00  idle           — EVCS: available = 9.5 − husforbruk → lader med ~8A
-kl 02:00  charge 10kW   — EVCS: available = 9.5 − 11.5 = −2 kW → stopp
+kl 02:00  charge 8kW    — live grid=1.5kW → headroom=8kW → lader 8kW (ikke 10kW)
 kl 03:00  idle (SOC 90%) — EVCS: available = 9.5 − 1.5 = 8.0 kW → 16A = 3.7 kW
 ```
 
@@ -208,23 +228,34 @@ available_kw = 9.5 − (−3) = 12.5 kW
 amps = min(7000/230, 16) = 16A → 3.7 kW til elbil
 ```
 
+### Scenario: Natt-lading med høyt husforbruk (peak-cap)
+
+```
+Husforbruk: 3.0 kW (gulvvarme + kjøl/frys)
+Peak-limit: 9.5 kW → headroom = 6.5 kW
+Planlagt lading: 10 kW
+Faktisk lading: 6.5 kW (cappet av _execute_action)
+Peak-grensen overholdes.
+```
+
 ---
 
 ## 8. Kjente svakheter / forbedringspotensial
 
-### 🔴 Høy prioritet
-1. **`ELVIA_CAPACITY_STEPS` i `optimizer.py` linje 27** — variabelnavnet sier Elvia, skal være Føie AS. Verdiene er riktige men brukes ikke (duplikat av `CAPACITY_TIERS` i `tariff.py`). Bør fjernes.
-2. **Natt-lading over peak-limit** — hvis batteri lader 10 kW og husforbruk er 1.5 kW = 11.5 kW total. Peak-shaving sparker inn og reduserer, men det tar opp til 10s å reagere. Bør koordineres bedre i `_execute_action`.
-
 ### 🟡 Medium prioritet
-3. **Ingen re-planlegging intratime** — hvis strømprisene endres (neste dag publiseres kl 13) oppdateres ikke planen før neste time-syklus. Bør trigge re-plan ved prisoppdatering.
-4. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100` antar lineær SOC. SmartShunt er mer nøyaktig — bør hente direkte fra SmartShunt via Modbus.
-5. **EVCS støtter kun én lader** — ved to biler i samme lader fungerer det, men to separate ladere håndteres ikke.
+1. **Negativ reell kjøpspris trigger ikke alltid lading** — ved høy Norgespris-støtte kan
+   reell kjøpspris bli negativ. `should_charge()` er profittpris-basert og lader ikke
+   aggressivt nok i disse timene. Vurder å legge til spesialhåndtering.
+2. **Ingen re-planlegging intratime** — hvis priser publiseres kl 13 oppdateres ikke planen
+   før neste time-syklus. Bør trigge re-plan ved prisoppdatering.
+3. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100` antar
+   lineær SOC. Bør hente direkte fra SmartShunt via Modbus for nøyaktighet.
+4. **EVCS støtter kun én lader** — to separate ladere håndteres ikke.
 
 ### 🟢 Lav prioritet
-6. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
-7. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
-8. **Profitt-dashboard viser kun dagens handler** — ingen ukes/måneds-graf.
+5. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
+6. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
+7. **Profitt-dashboard viser kun dagens handler** — ingen ukes/måneds-graf.
 
 ---
 
@@ -232,15 +263,21 @@ amps = min(7000/230, 16) = 16A → 3.7 kW til elbil
 
 | Fil | Ansvar |
 |---|---|
-| `main.py` | Trading-loop, peak-shaving, EVCS-koordinering, keepalive |
-| `optimizer.py` | 24t-plan, discharge/charge-valg, peak_shave() |
-| `tariff.py` | Prisberegning, kapasitetstrinn, should_discharge/charge |
+| `main.py` | Trading-loop, peak-shaving, EVCS-koordinering, keepalive, peak-cap ved lading |
+| `optimizer.py` | 24t-plan, discharge/charge-valg, peak_shave(), statisk peak-cap estimat |
+| `tariff.py` | Prisberegning, kapasitetstrinn (autoritativ kilde), should_discharge/charge |
 | `config.py` | Alle konfig-parametre via env-variabler |
 | `victron_modbus.py` | Modbus-TCP kommunikasjon med Cerbo GX |
 | `ha_qubino.py` | Qubino grid-måling + EVCSController via HA REST |
 | `price_fetcher.py` | Spotpriser fra hvakosterstrommen.no |
 | `profit_tracker.py` | SQLite trade-logging og statistikk |
 | `web.py` | Flask dashboard + REST API |
+
+> **Merk for Windsurf/AI-assistenter:**
+> - Kapasitetstrinn er definert KUN i `tariff.py` (`CAPACITY_TIERS`) — ikke dupliser i andre filer
+> - Live grid-cap skjer i `main.py._execute_action()`, ikke i `optimizer.py`
+> - `optimizer.py` bruker statisk estimat (1.5 kW) for fremtidsplanlegging — dette er tilsiktet
+> - `_decide_action_tariff()` er fjernet (var dead code) — bruk `get_immediate_action()` → `optimize()`
 
 ---
 
@@ -263,7 +300,7 @@ MAX_SOC=90
 PEAK_LIMIT_KW=9.5
 PEAK_RESERVE_KWH=5.0
 
-# EVCS (1-fase)
+# EVCS (1-fase!)
 EVCS_ENTITY_PREFIX=evcs_hq2309vtvnf
 EVCS_MIN_CURRENT_A=6
 EVCS_MAX_CURRENT_A=16
@@ -283,3 +320,17 @@ CAPACITY_CHARGE_NOK=662.50
 HA_URL=https://homeassistant.abelgaard.no
 HA_TOKEN=<secret>
 ```
+
+---
+
+## 11. Endringslogg (teknisk)
+
+| Dato | Endring |
+|---|---|
+| 2026-05-11 | Produksjonssetting: DESS deaktivert, Hub4Mode=3, Qubino primærmåler |
+| 2026-05-11 | Export-guard: 30% → 60% toleranse |
+| 2026-05-11 | `_decide_action_tariff()` fjernet (dead code) |
+| 2026-05-11 | Natt-lading cappet mot live grid/peak-limit i `_execute_action` |
+| 2026-05-11 | `optimizer.py`: statisk 1.5 kW nattforbruk-estimat for fremtidsplan |
+| 2026-05-11 | SQLite `datetime('now', 'localtime')` for korrekt Oslo-tid |
+| 2026-05-11 | `SYSTEM_ANALYSIS.md` oppdatert med seksjon 6.4 og Windsurf-notater |
