@@ -58,7 +58,8 @@ class VictronModbus:
     # System unit (100) read-only registre
     REG_SOC               = 266    # Battery SOC (scale /10 → %)
     REG_GRID_L1           = 820    # Grid L1 power (W, signed)
-    REG_PV_POWER          = 850    # PV / Solar charger power (W) - Fronius Primo
+    REG_PV_POWER          = 808    # AC-coupled PV on AC output L1 (W) - Fronius Primo 5kW
+    #                      850    # AC-coupled PV on output (alternativ, gir 0 nå)
 
     # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
     UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS setpoint(2716/2700)
@@ -239,22 +240,13 @@ class VictronModbus:
 
     def get_solar_power(self) -> Optional[float]:
         """
-        Hent sol-produksjon fra Fronius Primo (AC-coupled via PV inverter).
-        Register 850: PV power (W) fra system unit.
+        Hent sol-produksjon fra Fronius Primo 5kW (AC-coupled på AC output).
+        Register 808: AC Consumption L1 = PV-produksjon når Fronius er på output-siden.
+        Verifisert 2026-05-11: reg808@device100 = 750W med sol ute.
         """
-        try:
-            result = self.client.read_holding_registers(
-                address=self.REG_PV_POWER,
-                count=1,
-                device_id=100
-            )
-            if result and not result.isError() and result.registers:
-                val = result.registers[0]
-                if val > 32767:
-                    val -= 65536
-                return float(max(0, val))  # Alltid positiv (produksjon)
-        except Exception as e:
-            logger.debug(f"Could not read solar power: {e}")
+        raw = self._read_signed16(self.REG_PV_POWER)
+        if raw is not None:
+            return float(max(0, raw))
         return None
 
 
