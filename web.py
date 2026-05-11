@@ -14,9 +14,50 @@ app = Flask(__name__)
 tracker = ProfitTracker()
 fetcher = PriceFetcher()
 
-# Cache priser for å unngå for mange API-kall
+# Cache priser
 _price_cache = {"data": [], "fetched": None}
 _price_lock = threading.Lock()
+
+# Cache live Cerbo GX data (polles hvert 10s i bakgrunn)
+_live_cache = {
+    "soc": None, "grid_w": None, "solar_w": None,
+    "battery_w": None, "updated": None, "error": None
+}
+_live_lock = threading.Lock()
+
+def _poll_cerbo():
+    """Bakgrunnstråd: les Cerbo GX via Modbus hvert 10s."""
+    from victron_modbus import VictronModbus
+    vic = VictronModbus()
+    connected = False
+    while True:
+        import time
+        try:
+            if not connected:
+                connected = vic.connect()
+            if connected:
+                soc     = vic.get_soc()
+                grid_w  = vic.get_grid_power()
+                solar_w = vic.get_solar_power()
+                # Batteri-effekt: reg 842
+                bat_raw = vic._read_signed16(842)
+                with _live_lock:
+                    _live_cache.update({
+                        "soc": soc, "grid_w": grid_w,
+                        "solar_w": solar_w, "battery_w": bat_raw,
+                        "updated": datetime.now().isoformat(),
+                        "error": None
+                    })
+        except Exception as e:
+            connected = False
+            with _live_lock:
+                _live_cache["error"] = str(e)
+        time.sleep(10)
+
+# Start Modbus-polling kun om VICTRON_HOST er satt
+if os.getenv("VICTRON_HOST"):
+    _t = threading.Thread(target=_poll_cerbo, daemon=True)
+    _t.start()
 
 def get_prices_cached():
     with _price_lock:
@@ -74,6 +115,13 @@ def api_prices():
 def api_trades():
     trades = tracker.get_recent_trades(20)
     return jsonify(trades)
+
+
+@app.route("/api/live")
+def api_live():
+    """Live data fra Cerbo GX via Modbus."""
+    with _live_lock:
+        return jsonify(dict(_live_cache))
 
 
 @app.route("/api/plan")
@@ -210,6 +258,34 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="card-title">Margin</div>
       <div class="card-value" id="marginOre">—</div>
       <div class="card-sub" id="marginStatus">—</div>
+    </div>
+  </div>
+
+  <!-- Live Cerbo GX-data -->
+  <div class="grid grid-4" style="margin-bottom:1rem" id="cerboSection">
+    <div class="card">
+      <div class="card-title">🔋 Batteri SOC</div>
+      <div class="card-value" id="liveSoc">—</div>
+      <div class="card-sub" id="liveSocBar" style="margin-top:.5rem">
+        <div style="background:#1e3a5f;border-radius:4px;height:6px;overflow:hidden">
+          <div id="socBarFill" style="height:100%;background:#22c55e;width:0%;transition:width .5s"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">⚡ Nett (grid)</div>
+      <div class="card-value" id="liveGrid">—</div>
+      <div class="card-sub" id="liveGridSub">W fra nett</div>
+    </div>
+    <div class="card">
+      <div class="card-title">☀️ Sol (Fronius 5kW)</div>
+      <div class="card-value yellow" id="liveSolar">—</div>
+      <div class="card-sub" id="liveSolarSub">W produksjon</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔌 Batteri effekt</div>
+      <div class="card-value" id="liveBattery">—</div>
+      <div class="card-sub" id="liveBatterySub">W (+ = lader)</div>
     </div>
   </div>
 
@@ -479,8 +555,60 @@ async function fetchPlan() {
   });
 }
 
+async function fetchLive() {
+  try {
+    const res = await fetch('/api/live');
+    const d = await res.json();
+
+    if (d.error || d.soc === null) {
+      // Ingen live Modbus — skjul ikke seksjonen, vis "Ikke tilkoblet"
+      document.getElementById('liveSoc').textContent = '—';
+      document.getElementById('liveGrid').textContent = '—';
+      document.getElementById('liveSolar').textContent = '—';
+      document.getElementById('liveBattery').textContent = '—';
+      document.getElementById('liveGridSub').textContent = d.error ? 'Modbus: ' + d.error.substring(0,30) : 'Kobler til...';
+      return;
+    }
+
+    // SOC
+    const soc = d.soc ?? 0;
+    const socColor = soc >= 80 ? '#22c55e' : soc >= 50 ? '#facc15' : '#ef4444';
+    document.getElementById('liveSoc').textContent = soc.toFixed(1) + '%';
+    document.getElementById('liveSoc').style.color = socColor;
+    document.getElementById('socBarFill').style.width = soc + '%';
+    document.getElementById('socBarFill').style.background = socColor;
+
+    // Grid
+    const gw = d.grid_w ?? 0;
+    const gridEl = document.getElementById('liveGrid');
+    gridEl.textContent = (gw >= 0 ? '+' : '') + Math.round(gw) + ' W';
+    gridEl.style.color = gw > 500 ? '#ef4444' : gw < -100 ? '#22c55e' : '#94a3b8';
+    document.getElementById('liveGridSub').textContent = gw > 0 ? 'importerer fra nett' : gw < 0 ? 'eksporterer til nett' : 'nøytral';
+
+    // Sol
+    const sw = d.solar_w ?? 0;
+    document.getElementById('liveSolar').textContent = Math.round(sw) + ' W';
+    const pct = Math.min(100, (sw / (CONFIG_SOLAR_MAX * 1000)) * 100);
+    document.getElementById('liveSolarSub').textContent = sw > 0 ? `${pct.toFixed(0)}% av ${CONFIG_SOLAR_MAX}kW maks` : 'ingen produksjon';
+
+    // Batteri
+    const bw = d.battery_w ?? 0;
+    const batEl = document.getElementById('liveBattery');
+    batEl.textContent = (bw >= 0 ? '+' : '') + Math.round(bw) + ' W';
+    batEl.style.color = bw > 100 ? '#60a5fa' : bw < -100 ? '#fb923c' : '#94a3b8';
+    document.getElementById('liveBatterySub').textContent = bw > 100 ? 'lader' : bw < -100 ? 'utlader' : 'standby';
+
+  } catch(e) {
+    console.warn('fetchLive feil:', e);
+  }
+}
+
+// Inject solar max fra server
+let CONFIG_SOLAR_MAX = 5.0;
+fetch('/api/status').then(r=>r.json()).then(d => { CONFIG_SOLAR_MAX = d.solar_max_kw || 5.0; });
+
 async function refresh() {
-  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan()]);
+  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan(), fetchLive()]);
 }
 
 refresh();
