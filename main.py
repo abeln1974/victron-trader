@@ -32,6 +32,7 @@ class EnergyTrader:
         self.tracker = ProfitTracker()
         self.running = False
         self.current_action: Optional[Action] = None
+        self._action_start_time: float = 0.0  # Tidspunkt da discharge startet (for ramp-up)
 
     def start(self):
         logger.info("Starting Energy Trader...")
@@ -101,12 +102,19 @@ class EnergyTrader:
             if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
                 if current_time - last_keepalive >= 3:
                     if self.current_action.action == 'discharge':
-                        grid_w = self._get_grid_power() or 0
+                        # Vent 45s etter oppstart for ramp-up (MultiPlus + Qubino IT-nett trenger tid)
+                        if current_time - self._action_start_time < 45:
+                            self.victron.send_keepalive()
+                            last_keepalive = current_time
+                            continue
+                        battery_w = self.victron.get_battery_power() or 0
                         discharge_w = abs(self.current_action.power_kw) * 1000
-                        if grid_w > -(discharge_w * 0.6):
+                        # Battery power er negativ ved utlading (Victron konvensjon)
+                        # Hvis batteriet ikke leverer minst 40% av planlagt → noe er galt
+                        if battery_w > -(discharge_w * 0.4):
                             logger.warning(
-                                f"Export-guard: Grid {grid_w:.0f}W -- lokalt forbruk for hoyt, "
-                                f"stopper utlading (elbil/last?) -- grid={grid_w:.0f}W, grense={-(discharge_w*0.6):.0f}W"
+                                f"Export-guard: Batteri leverer kun {battery_w:.0f}W "
+                                f"(forventer minst -{discharge_w*0.4:.0f}W) — stopper utlading"
                             )
                             self.victron.stop_ess_control()
                             self.current_action = None
@@ -247,6 +255,7 @@ class EnergyTrader:
             success = self.victron.set_discharge_power(abs(action.power_kw))
             if success:
                 self._action_start_soc = soc
+                self._action_start_time = time.time()
                 logger.info(f"Discharging {abs(action.power_kw):.1f}kW | {action.reason}")
                 self.current_action = action
 

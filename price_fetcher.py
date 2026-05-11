@@ -96,8 +96,9 @@ class PriceFetcher:
         except RuntimeError:
             pass
 
-        # Filter future hours only
-        future = [p for p in points if p.timestamp >= now]
+        # Filtrer: inkluder nåværende time (sammenlign kun på time-nivå)
+        now_hour = now.replace(minute=0, second=0, microsecond=0)
+        future = [p for p in points if p.timestamp >= now_hour]
         return future[:hours]
 
     def get_current_price(self) -> Optional[PricePoint]:
