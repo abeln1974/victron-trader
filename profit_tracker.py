@@ -127,7 +127,7 @@ class ProfitTracker:
         """Hent siste N handler for dashboard."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute(
-            "SELECT timestamp, trade_type, energy_kwh, price_nok_kwh, net_profit_nok "
+            "SELECT timestamp, action, energy_kwh, price_nok_kwh, net_profit_nok "
             "FROM trades ORDER BY timestamp DESC LIMIT ?",
             (limit,)
         )

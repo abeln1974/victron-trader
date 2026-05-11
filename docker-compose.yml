@@ -16,7 +16,7 @@ services:
     
     environment:
       # Victron Modbus-TCP config
-      - VICTRON_HOST=${VICTRON_HOST:-192.168.1.100}
+      - VICTRON_HOST=${VICTRON_HOST:-192.168.1.60}
       - VICTRON_MODBUS_PORT=${VICTRON_MODBUS_PORT:-502}
       - VICTRON_UNIT_ID=${VICTRON_UNIT_ID:-246}
       
@@ -65,15 +65,18 @@ services:
     container_name: victron-web
     restart: unless-stopped
     command: python web.py
-    ports:
-      - "8080:8080"
+    network_mode: host  # Trenger tilgang til Cerbo GX på 192.168.1.60
     environment:
+      - VICTRON_HOST=${VICTRON_HOST:-192.168.1.60}
+      - VICTRON_MODBUS_PORT=${VICTRON_MODBUS_PORT:-502}
+      - READONLY_MODE=true          # Kun lesing — ingen skriving til Cerbo GX
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-48}
       - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
       - MIN_SOC=${MIN_SOC:-50}
       - MAX_SOC=${MAX_SOC:-95}
+      - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
       - WEB_PORT=8080
       - DB_PATH=/app/data/profit.db
     volumes:

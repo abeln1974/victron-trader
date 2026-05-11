@@ -28,6 +28,7 @@ SIKKERHET:
 - Batteriet kan ikke skades via Modbus-kommandoer
 - Sett setpoint=0 for å gi kontroll tilbake til ESS
 """
+import os
 import logging
 from typing import Optional
 from pymodbus.client import ModbusTcpClient
@@ -58,6 +59,7 @@ class VictronModbus:
 
     # Unit-ID for ESS kontroll og systemdata
     UNIT_SYSTEM           = 100    # com.victronenergy.system (alle ESS-registre)
+    UNIT_BATTERY          = 226    # com.victronenergy.battery (SmartShunt 800Ah)
     
     def __init__(self,
                  host: str = CONFIG.victron_host,
@@ -66,6 +68,10 @@ class VictronModbus:
         self.port = port
         self.client: Optional[ModbusTcpClient] = None
         self._connected = False
+        # READONLY_MODE=true → les alt, skriv ingenting
+        self.readonly = os.getenv("READONLY_MODE", "false").lower() == "true"
+        if self.readonly:
+            logger.info("🔒 READONLY_MODE aktiv — ingen skriving til Cerbo GX")
 
     def connect(self) -> bool:
         """Koble til Cerbo GX Modbus-TCP."""
@@ -94,12 +100,15 @@ class VictronModbus:
 
     def _write_register(self, address: int, value: int, unit: int = None) -> bool:
         """Skriv til enkelt register."""
+        if self.readonly:
+            logger.warning(f"🔒 READONLY_MODE: blokkerte skriving til reg {address}={value}")
+            return False
         if not self._connected or not self.client:
             logger.error("Not connected to Modbus")
             return False
-        slave = unit if unit is not None else self.UNIT_SYSTEM
+        uid = unit if unit is not None else self.UNIT_SYSTEM
         try:
-            result = self.client.write_register(address=address, value=value, slave=slave)
+            result = self.client.write_register(address=address, value=value, device_id=uid)
             if result.isError():
                 logger.error(f"Modbus write error to register {address}: {result}")
                 return False
@@ -112,9 +121,9 @@ class VictronModbus:
         """Les fra register."""
         if not self._connected or not self.client:
             return None
-        slave = unit if unit is not None else self.UNIT_SYSTEM
+        uid = unit if unit is not None else self.UNIT_SYSTEM
         try:
-            result = self.client.read_holding_registers(address=address, count=count, slave=slave)
+            result = self.client.read_holding_registers(address=address, count=count, device_id=uid)
             if result.isError():
                 return None
             return result.registers
@@ -133,6 +142,9 @@ class VictronModbus:
         VIKTIG: Må kalles minst hvert 60. sekund for å holde setpointet aktivt.
         Kilde: https://www.victronenergy.com/live/ess:ess_mode_2_and_3
         """
+        if self.readonly:
+            logger.warning(f"🔒 READONLY_MODE: blokkerte grid setpoint {power_watts}W")
+            return False
         # 32-bit signed → to 16-bit registre (big-endian)
         w = int(power_watts)
         # Konverter til unsigned 32-bit
@@ -147,7 +159,7 @@ class VictronModbus:
             result = self.client.write_registers(
                 address=self.REG_GRID_SETPOINT_LO,
                 values=[lo, hi],
-                slave=self.UNIT_SYSTEM
+                device_id=self.UNIT_SYSTEM
             )
             if result.isError():
                 logger.error(f"Modbus write error reg 2716/2717: {result}")
@@ -178,7 +190,7 @@ class VictronModbus:
         val = amps if amps >= 0 else 0xFFFF  # -1 som uint16
         try:
             result = self.client.write_register(
-                address=self.REG_MAX_CHARGE_AMP, value=val, slave=self.UNIT_SYSTEM)
+                address=self.REG_MAX_CHARGE_AMP, value=val, device_id=self.UNIT_SYSTEM)
             return not result.isError()
         except Exception:
             return False
@@ -188,7 +200,7 @@ class VictronModbus:
         val = watts if watts >= 0 else 0xFFFF
         try:
             result = self.client.write_register(
-                address=self.REG_MAX_DISCHARGE_W, value=val, slave=self.UNIT_SYSTEM)
+                address=self.REG_MAX_DISCHARGE_W, value=val, device_id=self.UNIT_SYSTEM)
             return not result.isError()
         except Exception:
             return False
@@ -197,7 +209,7 @@ class VictronModbus:
         """Les ett signed 16-bit register fra Unit 100."""
         try:
             result = self.client.read_holding_registers(
-                address=address, count=1, slave=self.UNIT_SYSTEM)
+                address=address, count=1, device_id=self.UNIT_SYSTEM)
             if result and not result.isError() and result.registers:
                 val = result.registers[0]
                 return float(val - 65536 if val > 32767 else val)
@@ -206,9 +218,15 @@ class VictronModbus:
         return None
 
     def get_soc(self) -> Optional[float]:
-        """Battery SOC. Register 266, scale /10. (Unit 100)"""
-        raw = self._read_signed16(self.REG_SOC)
-        return raw / 10.0 if raw is not None else None
+        """Battery SOC. Register 266, scale /10. (SmartShunt unit 226)"""
+        try:
+            result = self.client.read_holding_registers(
+                address=self.REG_SOC, count=1, device_id=self.UNIT_BATTERY)
+            if result and not result.isError() and result.registers:
+                return result.registers[0] / 10.0
+        except Exception as e:
+            logger.debug(f"get_soc feilet: {e}")
+        return None
 
     def get_grid_power(self) -> Optional[float]:
         """Grid L1 power in Watt. Register 820, signed. (Unit 100)"""
@@ -224,7 +242,7 @@ class VictronModbus:
             result = self.client.read_holding_registers(
                 address=self.REG_PV_POWER,
                 count=1,
-                slave=100
+                device_id=100
             )
             if result and not result.isError() and result.registers:
                 val = result.registers[0]
