@@ -1,7 +1,27 @@
 """Optimalisering av lade/utlade-strategi."""
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+import logging
+
+def get_norwegian_utc_offset(timestamp: datetime) -> int:
+    """Returnerer UTC offset for Norge (1 for vintertid, 2 for sommertid).
+    
+    Norsk DST (siste søndag i mars/oktober):
+    - Sommertid: Siste søndag i mars kl 03:00 UTC → UTC+2
+    - Vintertid: Siste søndag i oktober kl 02:00 UTC → UTC+1
+    """
+    # Enkel regel: sommertid ca 29.mars - 25.oktober
+    # Dette er tilstrekkelig nøyaktig for formålet
+    if 3 <= timestamp.month <= 10:
+        if timestamp.month == 3 and timestamp.day < 25:
+            return 1  # Før sommertid
+        elif timestamp.month == 10 and timestamp.day >= 25:
+            return 1  # Etter vintertid
+        else:
+            return 2  # Sommertid
+    else:
+        return 1  # Vintertid (november-februar)
 from price_fetcher import PricePoint, PriceFetcher
 from tariff import (
     buy_price_ore, sell_price_ore, should_charge, should_discharge,
@@ -115,8 +135,9 @@ class Optimizer:
         for i, p in enumerate(prices):
             spot_ore = p.price_ore_kwh / CONFIG.vat
             hour = p.timestamp.hour
-            # Konverter UTC til lokal tid (Norge UTC+2 sommertid)
-            local_hour = (hour + 2) % 24
+            # Konverter UTC til lokal tid (automatisk sommer/vintertid)
+            utc_offset = get_norwegian_utc_offset(p.timestamp)
+            local_hour = (hour + utc_offset) % 24
             is_night = not (6 <= local_hour < 22)
             sol_lader = solar_kw >= CONFIG.solar_threshold_kw
             buy_ore = buy_prices[i]
@@ -216,8 +237,9 @@ class Optimizer:
         """
         buy_ore  = buy_price_ore(spot_ore, hour)
         sell_ore = sell_price_ore()
-        # Konverter UTC til lokal tid (Norge UTC+2 sommertid)
-        local_hour = (hour + 2) % 24
+        # Konverter UTC til lokal tid (automatisk sommer/vintertid)
+        utc_offset = get_norwegian_utc_offset(price.timestamp)
+        local_hour = (hour + utc_offset) % 24
         is_night = not (6 <= local_hour < 22)
         sol_lader = solar_kw >= CONFIG.solar_threshold_kw  # Fronius Primo 5kW, terskel 0.5kW
 
