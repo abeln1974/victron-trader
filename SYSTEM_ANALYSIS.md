@@ -404,7 +404,20 @@ HA_TOKEN=<secret>
 
 ---
 
-## 12. Endringslogg (teknisk)
+## 12. Huskelapper / Planlagte endringer
+
+| Dato | Gjør dette | Prioritet |
+|---|---|---|
+| **~2026-05-21** | Hev `MIN_PRICE_DIFF_NOK` fra 0.10 → 0.50 i `.env` etter testperiode. Se seksjon 8.5. | 🔴 Høy |
+
+> **Bakgrunn MIN_PRICE_DIFF_NOK:**
+> 0.10 brukes nå for å verifisere at alt fungerer (trading trigges, handler logges, EVCS koordineres).
+> Etter 10 dager: bekreft at handler er korrekte i dashboardet, så hev til 0.50–0.80 for å
+> beskytte batterilevetid. Daglig arbitrasje ved 0.10 sliter batteriet uten tilstrekkelig gevinst.
+
+---
+
+## 13. Endringslogg (teknisk)
 
 | Dato | Endring |
 |---|---|
