@@ -61,61 +61,34 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Proxmox Deployment
+## Deployment Arkitektur
 
-**⚠️ Viktig**: Installer **aldri** Docker direkte på Proxmox VE host (PVE1/PVE2/PVE3/PVE4). 
-Dette er en sikkerhetsrisiko og kan ødelegge hypervisor.
+**Kun lokal Docker** - dette programmet kjøres på én maskin med Docker.
 
-### Trygg metode: Privileged LXC Container
+**Gitea** brukes kun for kode-lagring og versjonskontroll.
 
-Anbefalt: **Privileged LXC** på PVE1 (eller PVE2/PVE3/PVE4):
+**Proxmox** skal aldri brukes til å kjøre Docker (sikkerhetsrisiko).
 
-```bash
-# På Proxmox host (f.eks. PVE1)
-# 1. Last ned template
-pveam download local debian-12-standard_12.7-1_amd64.tar.zst
+### Oppsett
 
-# 2. Opprett privileged LXC med Docker-støtte
-pct create 201 local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst \
-  --hostname victron-trader \
-  --cores 1 --memory 512 --swap 512 \
-  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
-  --storage local-zfs --rootfs local-zfs:8 \
-  --features nesting=1,keyctl=1
-
-pct start 201
-
-# 3. Installer Docker (inne i LXC)
-pct exec 201 -- bash -c "
-  apt-get update && apt-get install -y ca-certificates curl gnupg git && \
-  install -m 0755 -d /etc/apt/keyrings && \
-  curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-  echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable' > /etc/apt/sources.list.d/docker.list && \
-  apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-"
-
-# 4. Klon repo og start
-git clone https://gitea.abelgaard.no:3000/lars/victron-trader.git
-cp victron-trader/.env.example victron-trader/.env
-# Rediger .env med VICTRON_HOST=192.168.1.x
-pct exec 201 -- bash -c "cd /opt && git clone https://gitea.abelgaard.no:3000/lars/victron-trader.git"
-pct exec 201 -- bash -c "cd /opt/victron-trader && docker compose up -d"
-```
-
-Se `proxmox-lxc-setup.md` for detaljert guide.
-
-### Alternativ: Eksisterende server med Docker
-
-Hvis du allerede har Docker på en annen server (f.eks. LadeFiks 10.10.10.159, Ollama 10.10.10.162, eller DagligAssistent 10.10.10.172):
+1. **Utvikling**: På denne maskinen (lokal Docker)
+2. **Produksjon**: Samme Docker-container på samme måte
+3. **Kode**: Pushet til Gitea for backup/deling
 
 ```bash
-ssh root@10.10.10.xxx
-cd /opt
+# Klon fra Gitea (eller bruk lokalt repo)
 git clone https://gitea.abelgaard.no:3000/lars/victron-trader.git
 cd victron-trader
+
+# Konfigurer
 cp .env.example .env
-# Rediger .env med VICTRON_HOST
+# Rediger .env med VICTRON_HOST=192.168.1.x (Cerbo GX IP)
+
+# Bygg og kjør
 docker compose up -d
+
+# Se logger
+docker compose logs -f
 ```
 
 ## Gitea (Abelgard)

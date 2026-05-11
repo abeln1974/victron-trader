@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     
     # Network mode for direct access to Victron on LAN
-    # Option 1: Host network (simplest, recommended for Proxmox)
+    # Host network gir enklest tilgang til Cerbo GX på 192.168.1.x
     network_mode: host
     
     # Option 2: Bridge network (hvis du vil isolere)
