@@ -33,6 +33,7 @@ class EnergyTrader:
         self.running = False
         self.current_action: Optional[Action] = None
         self._action_start_time: float = 0.0  # Tidspunkt da discharge startet (for ramp-up)
+        self._last_price_count: int = 0        # Antall pristimer sist hentet (detekterer nye Nordpool-priser)
 
     def start(self):
         logger.info("Starting Energy Trader...")
@@ -71,8 +72,9 @@ class EnergyTrader:
     def _main_loop(self):
         last_hour = -1
         last_status_min = -1
-        last_keepalive = 0.0
-        last_peak_shave = 0.0
+        last_keepalive = 0.0  # Siste gang vi sendte ESS keepalive
+        last_peak_shave = 0.0  # Siste peak-shave sjekk
+        last_price_count = 0   # Antall tilgjengelige pristimer sist vi sjekket
 
         while self.running:
             now = datetime.now(OSLO_TZ)
@@ -81,8 +83,22 @@ class EnergyTrader:
             if now.hour != last_hour:
                 last_hour = now.hour
                 self._execute_trade_cycle()
+                last_price_count = self._last_price_count
+
+            # Re-planlegg hvis nye priser er blitt tilgjengelig (Nordpool ~kl 13:00)
+            elif self._last_price_count > last_price_count:
+                logger.info(f"Nye priser tilgjengelig ({last_price_count} → {self._last_price_count} timer) — re-planlegger")
+                last_price_count = self._last_price_count
+                self._execute_trade_cycle()
 
             if current_time - last_peak_shave >= 10:
+                # Sjekk om nye Nordpool-priser er tilgjengelig (publiseres ~kl 13:00)
+                try:
+                    count = len(self.price_fetcher.get_prices(CONFIG.forecast_hours))
+                    if count > self._last_price_count:
+                        self._last_price_count = count
+                except Exception:
+                    pass
                 self._check_peak_shaving()
                 try:
                     grid_w  = self._get_grid_power() or 0
@@ -157,6 +173,7 @@ class EnergyTrader:
             logger.info(f"Current SOC: {soc:.1f}%")
 
             prices = self.price_fetcher.get_prices(CONFIG.forecast_hours)
+            self._last_price_count = len(prices)
             current = prices[0] if prices else None
 
             if not current:
