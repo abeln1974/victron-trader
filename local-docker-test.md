@@ -1,6 +1,6 @@
 # Lokal Docker Testing
 
-Test victron-trader på din lokale maskin før deploy til Proxmox/Abelgard.
+Test victron-trader på din lokale maskin.
 
 ## 1. Installer Docker (hvis ikke installert)
 
@@ -105,10 +105,7 @@ docker rmi victron-trader-victron-trader
 
 ## Når alt fungerer lokalt
 
-Deploy til Proxmox:
+Push til Gitea:
 ```bash
-# Push til Gitea
 git push origin master
-
-# SSH til PVE1 og følg proxmox-lxc-setup.md
 ```

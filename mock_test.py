@@ -217,8 +217,8 @@ def main():
     if all_passed:
         print("✅ ALLE TESTER BESTÅTT")
         print("="*50)
-        print("\nSystemet er klart for deploy til Proxmox!")
-        print("Følg instruksjonene i proxmox-lxc-setup.md")
+        print("\nSystemet er klart for bruk!")
+        print("Konfigurer VICTRON_HOST i .env og kjør med Docker.")
         return 0
     else:
         print("❌ NOEN TESTER FEILET")

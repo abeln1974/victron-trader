@@ -31,7 +31,7 @@ Automatisk strømhandel med Victron ESS. Kjøper strøm når den er billig, selg
 
 ## Oppsett
 
-### Alternativ 1: Docker (anbefalt for Proxmox)
+### Alternativ 1: Docker (anbefalt)
 
 ```bash
 # 1. Klon repo
@@ -66,8 +66,6 @@ python main.py
 **Kun lokal Docker** - dette programmet kjøres på én maskin med Docker.
 
 **Gitea** brukes kun for kode-lagring og versjonskontroll.
-
-**Proxmox** skal aldri brukes til å kjøre Docker (sikkerhetsrisiko).
 
 ### Oppsett
 
