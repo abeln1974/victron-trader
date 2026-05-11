@@ -76,6 +76,23 @@ def api_trades():
     return jsonify(trades)
 
 
+@app.route("/api/plan")
+def api_plan():
+    from optimizer import Optimizer
+    prices = get_prices_cached()
+    if not prices:
+        return jsonify([])
+    opt = Optimizer()
+    plan = opt.optimize(prices, current_soc=70.0)  # Bruker 70% som default uten live Modbus
+    return jsonify([{
+        "time": a.timestamp.strftime("%H:%M"),
+        "action": a.action,
+        "power_kw": round(a.power_kw, 1),
+        "reason": a.reason,
+        "profit_nok": round(a.expected_profit_nok, 3),
+    } for a in plan])
+
+
 @app.route("/")
 def dashboard():
     return render_template_string(DASHBOARD_HTML)
@@ -220,14 +237,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Graf + trades -->
-  <div class="grid grid-2">
+  <!-- Graf + handelsplan -->
+  <div class="grid grid-2" style="margin-bottom:1rem">
     <div class="card chart-card">
       <h2>Priser neste 24 timer</h2>
       <canvas id="priceChart"></canvas>
     </div>
+    <div class="card chart-card">
+      <h2>Handelsplan (smart topp-optimering)</h2>
+      <canvas id="planChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Handlingsplan tabell + siste handler -->
+  <div class="grid grid-2">
     <div class="card">
-      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">Siste handler</h2>
+      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">📋 24-timers plan</h2>
+      <div style="max-height:280px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Tid</th><th>Handling</th><th>kW</th><th>Begrunnelse</th></tr></thead>
+          <tbody id="planTable"><tr><td colspan="4" style="color:#475569">Laster plan...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">🔄 Siste handler</h2>
       <table>
         <thead><tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr></thead>
         <tbody id="tradesTable"><tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr></tbody>
@@ -336,6 +370,8 @@ async function fetchPrices() {
   });
 }
 
+let planChart = null;
+
 async function fetchTrades() {
   const res = await fetch('/api/trades');
   const trades = await res.json();
@@ -355,8 +391,96 @@ async function fetchTrades() {
   }).join('');
 }
 
+async function fetchPlan() {
+  const res = await fetch('/api/plan');
+  const plan = await res.json();
+  if (!plan.length) return;
+
+  const now = new Date().getHours() + ':' + String(new Date().getMinutes()).padStart(2,'0');
+
+  // Oppdater tabell
+  const tbody = document.getElementById('planTable');
+  tbody.innerHTML = plan.map(a => {
+    const isNow = a.time <= now && now < a.time;
+    const actionInfo = a.action === 'discharge'
+      ? { icon: '⚡', cls: 'orange', label: 'Utlad' }
+      : a.action === 'charge'
+      ? { icon: '🔋', cls: 'blue', label: 'Lad' }
+      : { icon: '⏸️', cls: '', label: 'Idle' };
+    const profitStr = a.action !== 'idle' && a.profit_nok !== 0
+      ? `<span style="font-size:.75rem;color:#64748b"> (${a.profit_nok > 0 ? '+' : ''}${a.profit_nok.toFixed(2)} kr)</span>`
+      : '';
+    return `<tr>
+      <td style="color:#64748b;font-variant-numeric:tabular-nums">${a.time}</td>
+      <td><span class="${actionInfo.cls}">${actionInfo.icon} ${actionInfo.label}</span>${profitStr}</td>
+      <td style="color:#e2e8f0">${a.power_kw !== 0 ? Math.abs(a.power_kw).toFixed(1) : '—'}</td>
+      <td style="color:#64748b;font-size:.78rem">${a.reason || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Oppdater planChart
+  const labels   = plan.map(a => a.time);
+  const discharge = plan.map(a => a.action === 'discharge' ? Math.abs(a.power_kw) : 0);
+  const charge    = plan.map(a => a.action === 'charge'    ? a.power_kw : 0);
+  const idle      = plan.map(a => a.action === 'idle'      ? 0.5 : 0);
+
+  if (planChart) {
+    planChart.data.labels = labels;
+    planChart.data.datasets[0].data = discharge;
+    planChart.data.datasets[1].data = charge;
+    planChart.update('none');
+    return;
+  }
+
+  const ctx = document.getElementById('planChart').getContext('2d');
+  planChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '⚡ Utlad (kW)',
+          data: discharge,
+          backgroundColor: '#fb923c99',
+          borderColor: '#fb923c',
+          borderWidth: 1,
+        },
+        {
+          label: '🔋 Lad (kW)',
+          data: charge,
+          backgroundColor: '#60a5fa99',
+          borderColor: '#60a5fa',
+          borderWidth: 1,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            afterLabel: (ctx) => {
+              const item = plan[ctx.dataIndex];
+              return item.reason ? `📝 ${item.reason}` : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
+        y: {
+          ticks: { color: '#64748b', callback: v => v + ' kW' },
+          grid: { color: '#1e293b' },
+          min: 0,
+        }
+      }
+    }
+  });
+}
+
 async function refresh() {
-  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades()]);
+  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan()]);
 }
 
 refresh();
