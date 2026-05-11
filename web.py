@@ -55,6 +55,7 @@ def api_status():
             "today_sold_kwh": round(stats.get("today_sold_kwh", 0), 1),
         },
         "capacity_charge_nok": CAPACITY_CHARGE_NOK,
+        "solar_max_kw": CONFIG.solar_max_kw,
     })
 
 

@@ -25,6 +25,10 @@ class Config:
     min_soc: float = float(os.getenv("MIN_SOC", "10"))
     max_soc: float = float(os.getenv("MAX_SOC", "90"))
 
+    # Solar (Fronius Primo 5kW AC-coupled)
+    solar_max_kw: float = float(os.getenv("SOLAR_MAX_KW", "5.0"))
+    solar_threshold_kw: float = float(os.getenv("SOLAR_THRESHOLD_KW", "0.5"))  # Min sol for å unngå nett-lading
+
     # Strategy
     min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "0.30"))
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))

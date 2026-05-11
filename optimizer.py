@@ -120,7 +120,7 @@ class Optimizer:
         buy_ore  = buy_price_ore(spot_ore, hour)
         sell_ore = sell_price_ore()
         is_night = not (6 <= hour < 22)
-        sol_lader = solar_kw > 0.5  # Sol produserer nok til å lade batteri
+        sol_lader = solar_kw >= CONFIG.solar_threshold_kw  # Fronius Primo 5kW, terskel 0.5kW
 
         # --- UTLAD: Spotpris er høy → bruk batteri istedenfor dyr gridstrøm ---
         if should_discharge(spot_ore, hour) and soc > self.min_soc:
