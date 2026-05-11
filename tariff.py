@@ -1,10 +1,9 @@
 """Beregning av reell kjøps- og salgspris for Abelgard.
 
-Basert på Føie AS Nettleiepriser 2026 (Ringerike/Hole/Nore) og Kraftriket (kraftriket.no):
+Basert på Føie AS Nettleiepriser 2026 (Ringerike/Hole/Nore) og Kraftriket Solstrøm:
 
-KJØP (per kWh inkl mva) — Føie AS faktura apr 2026:
-  Spotpris           (variabel, eks mva)
-  + Kraftriket påslag   6.50 øre  eks mva
+KJØP (per kWh inkl mva) — Kraftriket fastpris + Føie AS faktura apr 2026:
+  Kraftriket fastpris   40.00 øre  eks mva  (fast, uavhengig av spot)
   + Energiledd dag     16.50 øre  eks mva (06:00-22:00)  → 20.63 øre inkl mva
   + Energiledd natt    10.00 øre  eks mva (22:00-06:00)  → 12.50 øre inkl mva
   + Forbruksavgift      7.13 øre  eks mva (→ 8.91 inkl mva)
@@ -14,9 +13,8 @@ KJØP (per kWh inkl mva) — Føie AS faktura apr 2026:
   = Total reell innkjøpspris
 
 SALG som plusskunde (ingen mva):
-  Kraftriket betaler flat 75.00 øre/kWh uavhengig av spot
-  Nettselskap betaler -6.25 øre/kWh for produsert energi
-  → Netto salgspris: 75.00 - 6.25 = 68.75 øre/kWh
+  Salgspris = spotpris eks mva (Nordpool NO1, time-for-time)
+  Ingen påslag eller fratrekk fra Kraftriket ved salg
 
 KAPASITETSLEDD (Føie AS 2026) — kW-basert, inkl MVA:
   Trinn 1:  0– 1.99 kW =  237.5 kr/mnd
@@ -37,16 +35,14 @@ from datetime import datetime
 from typing import List, Tuple
 from config import CONFIG
 
-# Konstanter — Føie AS 2026 + Kraftriket (alle eks mva)
-SUPPLIER_MARKUP_ORE  = float(os.getenv("SUPPLIER_MARKUP_ORE",   "6.50"))
-GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva (Føie AS: 20.63 øre inkl mva / 1.25 = 16.504)
-GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 øre inkl mva / 1.25 = 10.00)
+# Konstanter — Føie AS 2026 + Kraftriket Solstrøm (alle eks mva)
+FIXED_PRICE_ORE      = float(os.getenv("FIXED_PRICE_ORE",       "40.00"))  # Kraftriket fastpris eks mva (uavhengig av spot)
+GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva (Føie AS: 20.63 øre inkl mva)
+GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 øre inkl mva)
 CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # eks mva (8.91 inkl mva)
 ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # eks mva (1.25 inkl mva)
 NORGES_PRICE_ORE     = float(os.getenv("NORGES_PRICE_ORE",      "96.53"))  # Statlig støtte, ingen mva
 CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))  # Trinn 4 (10-15kW) inkl MVA — faktisk trinn apr 2026
-SELL_PRICE_ORE       = float(os.getenv("SELL_PRICE_ORE",        "75.00"))  # Kraftriket betaler eks mva
-NET_SELL_BACK_ORE    = float(os.getenv("NET_SELL_BACK_ORE",      "6.25"))  # Føie AS tilbakebetaling produsert energi
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 
@@ -76,26 +72,26 @@ def buy_price_ore(spot_ore: float, hour: int) -> float:
     """
     Beregn total reell innkjøpspris i øre/kWh inkl mva og etter Norgespris-støtte.
 
-    spot_ore: Spotpris i øre eks mva (fra hvakosterstrommen.no)
-    hour: Time på dagen (0-23) for riktig nettariff
+    Kraftriket fastpris (40 øre eks mva) + nettleie + avgifter × mva − Norgespris.
+    spot_ore er IKKE brukt i kjøpsberegningen (fastprisavtale).
+    hour: Time på dagen (0-23) for riktig nettariff (dag/natt).
     """
     grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
 
-    # Strøm + nettleie + avgifter (eks mva), deretter mva
-    total_inkl_mva = (spot_ore + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
+    # Fastpris + nettleie + avgifter (eks mva), deretter × mva
+    total_inkl_mva = (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
 
     # Norgespris-støtte trekkes fra ETTER mva (ingen mva på støtten)
     return total_inkl_mva - NORGES_PRICE_ORE
 
 
-def sell_price_ore() -> float:
+def sell_price_ore(spot_ore: float = 0.0) -> float:
     """
-    Netto salgspris i øre/kWh:
-    - Kraftriket betaler 75 øre/kWh (ingen mva for privatperson)
-    - Nettselskap betaler tilbake 6.25 øre/kWh for produsert energi
-    → 75.00 - 6.25 = 68.75 øre/kWh netto
+    Salgspris i øre/kWh = spotpris eks mva (Nordpool NO1, time-for-time).
+    Ingen påslag eller fratrekk — Kraftriket betaler spot direkte.
+    spot_ore: Spotpris i øre eks mva.
     """
-    return SELL_PRICE_ORE - NET_SELL_BACK_ORE
+    return spot_ore
 
 
 def capacity_charge_for_kw(peak_kw: float) -> float:
@@ -115,25 +111,21 @@ def peak_reduction_savings(current_peak_kw: float, reduced_peak_kw: float) -> fl
 
 def profit_per_kwh_ore(spot_ore: float, hour: int) -> float:
     """
-    Beregn netto fortjeneste per kWh ved å:
-    1. Kjøpe strøm til spotpris (lage batteri)
-    2. Selge tilbake til fast 75 øre
-
-    Negativ = tap
+    Beregn netto fortjeneste per kWh:
+    Selger til spot, kjøpte til fastpris + avgifter.
+    Negativ = tap.
     """
     buy = buy_price_ore(spot_ore, hour)
-    sell = sell_price_ore()
+    sell = sell_price_ore(spot_ore)
     return sell - buy
 
 
 def should_charge(spot_ore: float, hour: int, min_profit_ore: float = 20.0) -> bool:
     """
     Skal vi lade batteriet nå?
-    Gir mening å lade når innkjøpspris er lav nok til at salg gir profitt.
+    Gir mening å lade når kjøpspris er lav nok til at fremtidig salg gir profitt.
     """
-    # Kjøp er lønnsomt hvis vi kan selge med margin
-    # inkl batteritap (efficiency)
-    effective_sell = sell_price_ore() * CONFIG.battery_efficiency
+    effective_sell = sell_price_ore(spot_ore) * CONFIG.battery_efficiency
     return buy_price_ore(spot_ore, hour) < (effective_sell - min_profit_ore)
 
 
@@ -141,17 +133,12 @@ def should_discharge(spot_ore: float, hour: int) -> bool:
     """
     Skal vi utlade batteriet nå?
 
-    VIKTIG: Norgespris-støtten er en SEPARAT statlig refusjon som vi får
-    uansett om vi selger eller bruker batteri til selvforbruk. Den skal
-    derfor IKKE trekkes fra alternativkostnaden i trading-beslutninger.
-
-    Vi sammenligner rå strømkostnad (spot + tariff + avgifter inkl mva,
-    UTEN Norgespris-fradrag) mot salgspris. Hvis spread > terskel, selg.
+    Sammenlign reell kjøpspris (fastpris + nettleie + avgifter inkl mva − Norgespris)
+    mot salgspris (spot eks mva). Hvis kjøpspris > salgspris + terskel → lønnsomt å selge.
     """
-    grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
-    # Rå kjøpspris inkl mva, men UTEN Norgespris-fradrag
-    raw_buy = (spot_ore + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
-    spread = raw_buy - sell_price_ore()
+    buy = buy_price_ore(spot_ore, hour)
+    sell = sell_price_ore(spot_ore)
+    spread = buy - sell
     min_spread_ore = CONFIG.min_price_diff_nok * 100
     return spread > min_spread_ore
 
@@ -159,14 +146,14 @@ def should_discharge(spot_ore: float, hour: int) -> bool:
 def format_prices(spot_ore: float, hour: int) -> str:
     """Human-readable prisinfo."""
     buy = buy_price_ore(spot_ore, hour)
-    sell = sell_price_ore()
+    sell = sell_price_ore(spot_ore)
     profit = sell - buy
     tariff = "dag" if is_day_tariff(hour) else "natt"
 
     return (
         f"Spot: {spot_ore:.1f} øre | "
         f"Kjøp ({tariff}): {buy:.1f} øre inkl mva | "
-        f"Salg: {sell:.1f} øre | "
+        f"Salg (spot): {sell:.1f} øre | "
         f"Margin: {profit:+.1f} øre"
     )
 

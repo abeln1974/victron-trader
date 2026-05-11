@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template_string
 
 from profit_tracker import ProfitTracker
 from price_fetcher import PriceFetcher
-from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK, GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE, SUPPLIER_MARKUP_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, is_day_tariff
+from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK, GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE, FIXED_PRICE_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, is_day_tariff
 from config import CONFIG, OSLO_TZ
 
 app = Flask(__name__)
@@ -102,10 +102,8 @@ def api_status():
     spot_ore = current.price_ore_kwh / CONFIG.vat if current else 0
     hour_now = datetime.now(OSLO_TZ).hour
     buy_ore = buy_price_ore(spot_ore, hour_now) if current else 0
-    sell_ore = sell_price_ore()
-    grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour_now) else GRID_TARIFF_NIGHT_ORE
-    raw_buy_ore = (spot_ore + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * CONFIG.vat if current else 0
-    discharge_margin = round(raw_buy_ore - sell_ore, 1)
+    sell_ore = sell_price_ore(spot_ore)
+    discharge_margin = round(buy_ore - sell_ore, 1)
 
     return jsonify({
         "timestamp": datetime.now(OSLO_TZ).isoformat(),
@@ -134,7 +132,7 @@ def api_prices():
         "time": p.timestamp.astimezone(OSLO_TZ).strftime("%d.%m %H:%M"),
         "spot_ore": round(p.price_ore_kwh / CONFIG.vat, 1),
         "buy_ore": round(buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour), 1),
-        "sell_ore": round(sell_price_ore(), 2),
+        "sell_ore": round(sell_price_ore(p.price_ore_kwh / CONFIG.vat), 2),
     } for p in prices])
 
 
@@ -459,7 +457,7 @@ async function fetchPrices() {
           pointRadius: 2,
         },
         {
-          label: 'Salgspris (68.75 øre)',
+          label: 'Salgspris (spot eks mva)',
           data: sellData,
           borderColor: '#22c55e',
           borderDash: [5, 5],

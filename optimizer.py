@@ -8,7 +8,7 @@ from tariff import (
     buy_price_ore, sell_price_ore, should_charge, should_discharge,
     capacity_charge_for_kw, CAPACITY_CHARGE_NOK,
     GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE,
-    SUPPLIER_MARKUP_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, VAT as TARIFF_VAT,
+    FIXED_PRICE_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, VAT as TARIFF_VAT,
     is_day_tariff
 )
 from config import CONFIG, OSLO_TZ
@@ -62,12 +62,16 @@ class Optimizer:
         # Beregn reell kjopspris per time (bruk norsk time for dag/natt-tariff)
         buy_prices = [buy_price_ore(p.price_ore_kwh / CONFIG.vat, p.timestamp.astimezone(OSLO_TZ).hour)
                       for p in prices]
-        sell_ore = sell_price_ore()
+        def spot_ore(p):
+            return p.price_ore_kwh / CONFIG.vat
+
+        def sell_ore(p):
+            return sell_price_ore(spot_ore(p))
 
         def raw_buy(p):
             h = p.timestamp.astimezone(OSLO_TZ).hour
             grid = GRID_TARIFF_DAY_ORE if is_day_tariff(h) else GRID_TARIFF_NIGHT_ORE
-            return (p.price_ore_kwh / CONFIG.vat + SUPPLIER_MARKUP_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
+            return (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
 
         # Topp-N strategi: velg de beste timene batteriet faktisk rekker
         # Sorter alle lønnsomme timer på høyeste råpris, ta fra toppen inntil batteri er tomt.
@@ -104,7 +108,7 @@ class Optimizer:
         for idx, bp in night_candidates:
             if remaining_charge <= 0:
                 break
-            if bp < sell_ore * self.efficiency:
+            if bp < sell_ore(prices[idx]) * self.efficiency:
                 charge_hours.add(idx)
                 remaining_charge -= min(self.max_charge, remaining_charge)
 
@@ -113,7 +117,7 @@ class Optimizer:
         soc = current_soc
 
         for i, p in enumerate(prices):
-            spot_ore = p.price_ore_kwh / CONFIG.vat
+            p_spot_ore = p.price_ore_kwh / CONFIG.vat
             local_hour = p.timestamp.astimezone(OSLO_TZ).hour
             is_night = not (6 <= local_hour < 22)
             sol_lader = solar_kw >= CONFIG.solar_threshold_kw
@@ -124,12 +128,13 @@ class Optimizer:
                 avail_kwh = max(0, self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve)
                 power = min(self.max_discharge, avail_kwh)
                 if power > 0:
-                    savings = buy_ore - sell_ore
+                    s_ore = sell_ore(p)
+                    savings = buy_ore - s_ore
                     profit = power * savings / 100
                     actions.append(Action(
                         timestamp=p.timestamp, action='discharge',
                         power_kw=-power, expected_profit_nok=profit,
-                        reason=f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}o (salg {sell_ore:.0f}o)'
+                        reason=f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}o (salg {s_ore:.0f}o)'
                     ))
                     soc_change = (power / self.efficiency / self.capacity) * 100
                     soc = max(soc - soc_change, self.min_soc)
