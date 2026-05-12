@@ -74,6 +74,16 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 - **Max SOC-håndhevelse**: se seksjon 6.5 — åpent problem (AC-koblet sol)
 - Startup-reset: Hub4Mode=2 og reg37=0 alltid ved oppstart (krasj-sikring)
 
+### Automatisk bytte mellom Mode 2 og Mode 3
+
+| Tilstand | Hub4Mode | Hvem styrer | Hva skjer |
+|---|---|---|---|
+| **Idle / ingen lønnsom handel** | 2 (Optimized) | Victron GX | Sol-lading skjer automatisk. Grid brukes kun til husforbruk. Trader overvåker og griper inn ved behov. |
+| **Lading/utlading (trading)** | 3 (ExternalControl) | Trader | Trader setter setpoint via Modbus. Victron følger ordre. |
+| **Peak-shaving triggered** | 3 (ExternalControl) | Trader | Trader overstyrer for å kutte effekttopp — prioritet over alt annet. |
+
+**Nøkkelpoeng:** Traderen har **alltid siste ordet** når det trengs. I idle-tilstand lar vi Victron styre, men peak-shaving eller trading aktiverer umiddelbart Mode 3. Se `victron_modbus.py:_ensure_external_control()` som automatisk bytter til Mode 3 ved `set_charge_power()` / `set_discharge_power()`.
+
 ---
 
 ## 3. Prisstruktur (Føie AS / Kraftriket + Norgespris, 2026)
@@ -196,6 +206,23 @@ amps = int(available_kw * 1000 / (phases * 230))
 amps = clamp(amps, min=6, max=16)
 ```
 
+### Peak-shaving vs EVCS — hva skjer ved 7000W elbillading?
+
+**Spørsmål:** Vil batteriet tømmes for å peak-shave når elbilen drar 7000W?
+
+**Svar:** **Nei** — batteriet brukes kun til peak-shaving når grid > 9.5 kW.
+
+| Scenario | Grid-last | Peak-shaving? | Batteri | EVCS |
+|---|---|---|---|---|
+| Elbil 7kW + hus 1kW | **8.0 kW** | Nei (< 9.5kW) | Fortsetter egen drift (trading/idle) | Lader med 7kW |
+| Elbil 11kW (16A 3-fase) | **11.0 kW** | Ja (> 9.5kW) | Utlader for å holde grid ≤ 9.5kW | Reduseres/stoppes av `adjust_for_trading()` |
+| Elbil 7kW + sol 3kW | **4.0 kW** | Nei | Lader kanskje fra sol | Lader med 7kW |
+| Elbil 7kW + trading lader 5kW | **12.0 kW** | Ja (> 9.5kW) | Peak-shaving prioriteres — lading reduseres | `available_kw = 9.5 - 7.0 = 2.5kW` → EVCS reduseres |
+
+**Buffer:** 7000W elbil har 2.5kW buffer (9.5 − 7.0) før peak-shaving trigges. Batteriet brukes primært til **trading**, ikke til å dekke normal elbillading. EVCSController sørger for at laderen justeres ned hvis kapasiteten blir trang.
+
+Se `main.py:_check_peak_shaving()` for logikk og `ha_qubino.py:adjust_for_trading()` for EVCS-koordinering.
+
 ---
 
 ## 6. Sikkerhetsfunksjoner
@@ -217,7 +244,28 @@ amps = clamp(amps, min=6, max=16)
 - MultiPlus hardware-timeout: nullstiller reg37 automatisk etter ~10s uten keepalive
 - `stop()` ved SIGTERM/SIGINT: rydder opp Hub4Mode og EVCS restore_auto()
 
-### 6.4 Peak-limit cap ved lading (main.py `_execute_action`)
+### 6.4 Idle-tilstand — hva skjer når ingenting trades?
+
+**Spørsmål:** Vil batteriet bli stående fast på høy SOC hvis det ikke er lønnsomme handler?
+
+**Svar:** Nei — SOC synker naturlig via husforbruk.
+
+**Hva skjer i idle (ingen lønnsom handel):**
+1. Trader går til Mode 2 (`stop_ess_control()`)
+2. Victron styrer selv — sol lader hvis tilgjengelig
+3. **Husforbruk** (0.5–1.5 kW kontinuerlig) trekker SOC sakte nedover
+4. Batteriet faller naturlig til ~85-89% på noen timer
+5. Trader tar over igjen når prisene blir gunstige
+
+**Ved høy SOC (≥90%):**
+- `_enforce_max_soc()` (kjøres hvert 10s) sikrer at trader ikke aktivt lader forbi 90%
+- Victron i Mode 2 går i Absorption → Float naturlig
+- Batteriet synker via husforbruk til under 89%
+- Ingen fare for overlading — BMS (57.4V) beskytter
+
+**Oppsummering:** Batteriet blir ikke «fast». Det går naturlig nedover av seg selv, og traderen tar kun over når det er en lønnsom handel å gjøre.
+
+### 6.5 Peak-limit cap ved lading (main.py `_execute_action`)
 Lading kan overskride peak-grensen hvis husforbruket er høyt.
 `_execute_action` leser live grid-effekt og capper ladeeffekten:
 ```python
@@ -230,7 +278,7 @@ charge_kw = min(action.power_kw, headroom_kw)
 `optimizer.py` bruker også et statisk estimat (1.5 kW typisk nattforbruk) for å planlegge
 konservativt fremover, men `_execute_action` bruker alltid live grid for faktisk cap.
 
-### 6.5 ⚠️ ÅPENT PROBLEM: Max SOC-håndhevelse ved AC-koblet sol
+### 6.6 ⚠️ ÅPENT PROBLEM: Max SOC-håndhevelse ved AC-koblet sol
 
 **Problemet:**
 Victron ESS har ingen Modbus-register for å sette øvre SOC-grense i Mode 2.
@@ -603,6 +651,9 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 > - Kapasitetstrinn er definert KUN i `tariff.py` (`CAPACITY_TIERS`) — ikke dupliser i andre filer
 > - Live grid-cap skjer i `main.py._execute_action()`, ikke i `optimizer.py`
 > - `optimizer.py` bruker statisk estimat (1.5 kW) for fremtidsplanlegging — dette er tilsiktet
+> - **Idle/Mode 2**: Se seksjon 2.1 og 6.4 — batteriet går naturlig ned via husforbruk, Victron styrer selv
+> - **Mode 2 ↔ 3 bytte**: Se seksjon 2.1 — trader har alltid siste ordet ved peak-shaving/trading
+> - **EVCS + peak-shaving**: Se seksjon 5.3 — 7kW elbil har 2.5kW buffer før peak-shaving trigges
 > - `_decide_action_tariff()` er fjernet (var dead code) — bruk `get_immediate_action()` → `optimize()`
 > - Systemet er primært peak-shaving/sol-selvforbruk — arbitrasje er sekundært (se seksjon 8)
 
