@@ -340,9 +340,95 @@ sjelden realistisk. Anbefalt tilnærming:
 
 ---
 
-## 9. Driftsanalyse — Natt 11–12 mai 2026 (første natt)
+## 9. Lønnsomhetsanalyse — Break-even og nødvendig fortjeneste
 
-### 9.1 Observasjoner fra logger
+### 9.1 Investeringsoversikt
+
+| Post | Beløp |
+|---|---|
+| Batteri (4×12.5 kWh NMC, Farco) | ~150 000 kr |
+| Installasjon / inverter / annet | ~30 000 kr |
+| **Total investering** | **~180 000 kr** |
+| Antatt levetid (20–90% SOC-vindu) | 15 år / ~3000 sykler |
+| Nødvendig inntekt for break-even 15 år | **12 142 kr/år (1 012 kr/mnd)** |
+
+### 9.2 Forventede inntekter
+
+| Inntektskilde | Beregning | Kr/år |
+|---|---|---|
+| **Peak-shaving** | Trinn 4→3: 243.7 kr/mnd × 12 | **2 924 kr** |
+| **Sol-selvforbruk via batteri** | 1 900 kWh × 81 øre (spart kjøpspris) | **1 539 kr** |
+| **Vinter-arbitrasje** | ~20 dager × 25 kWh × 70 øre netto | **350 kr** |
+| **Sum inntekter (basis)** | | **4 813 kr/år** |
+
+> Sol-selvforbruk: Fronius 5 kW, Ringerike ~950 kWh/kWp/år = 4 750 kWh/år total.
+> Estimert 40 % lagres via batteri og brukes selv istedenfor å importere fra nett.
+
+### 9.3 Kostnader
+
+| Kostnad | Kr/år |
+|---|---|
+| Kapitalavskrivning (180 000 / 15 år) | 12 000 kr |
+| Standby-strøm (~20W × 8760t × 81 øre) | 142 kr |
+| **Sum kostnader** | **12 142 kr/år** |
+
+### 9.4 Resultat — basis-scenario
+
+```
+Inntekter:   4 813 kr/år
+Kostnader:  12 142 kr/år
+─────────────────────────
+Netto:      −7 329 kr/år
+Break-even:    37.4 år  ← IKKE lønnsomt på 15 år
+```
+
+**Konklusjon: Systemet er ikke lønnsomt som ren investering** ved basis-forutsetninger.
+Break-even krever 15 år, men levetiden er ~15 år. Marginen er for liten.
+
+### 9.5 Sensitivitetsanalyse — break-even år
+
+| Scenario | Inntekt/år | Break-even |
+|---|---|---|
+| Pessimistisk (kun peak-shaving) | 2 924 kr | 61.6 år ❌ |
+| **Basis** (peak + sol + vinter-arb) | **4 813 kr** | **37.4 år** ❌ |
+| Optimistisk (+3 000 kWh sol via bat) | 7 243 kr | 24.9 år ❌ |
+| Med elbil-lading fra sol (+5 000 kWh) | 8 863 kr | 20.3 år ❌ |
+| **Break-even på 15 år krever** | **12 000 kr/år** | **15.0 år** ✅ |
+
+### 9.6 Hva skal til for å nå break-even på 15 år?
+
+Nødvendig ekstrainntekt utover basis: **7 329 kr/år**
+
+Mulige veier dit:
+
+| Tiltak | Effekt | Realisme |
+|---|---|---|
+| Øk elbil-lading fra sol (begge biler, mer sol) | +2 000–4 000 kr/år | 🟡 Mulig |
+| Strømprisøkning — spot 200+ øre snitt | +2 000–5 000 kr/år | 🟡 Mulig (vinter) |
+| Eksport-inntekt på topp-dager (spot 300+ øre) | +1 000–3 000 kr/år | 🟡 Avhenger av marked |
+| Kapasitetsledd ned til trinn 2 (< 5 kW peak) | +75 kr/mnd = 900 kr/år | 🔴 Krevende |
+| Lavere anskaffelseskost (regnet 30 000 kr for mye?) | Reduserer break-even | 🟢 Mulig |
+
+### 9.7 Reell vurdering
+
+Batterianlegget er **primært ikke en finansiell investering** — det er:
+- **Energiuavhengighet** og redundans (UPS-funksjon)
+- **Fremtidssikring** mot høyere strømpriser (sommer 2025–2026 er historisk lavt)
+- **Peak-shaving** som faktisk sparer 244 kr/mnd fra dag 1
+
+Ved strømprisnivåer tilsvarende vinteren 2022–2023 (spot 300–500 øre) ville
+arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt.
+
+> **Konklusjon:** Break-even realistisk ved ~20–25 år med normal drift og
+> gjennomsnittlige norske strømpriser. Prosjektet lønner seg **ikke** på ren
+> arbitrasje ved dagens sommerpriser, men peak-shaving og sol-selvforbruk
+> gir positiv kontantstrøm fra dag 1 (4 813 kr/år vs 0 uten systemet).
+
+---
+
+## 10. Driftsanalyse — Natt 11–12 mai 2026 (første natt)
+
+### 10.1 Observasjoner fra logger
 
 | Tid | SOC | Grid | Handling | Status |
 |---|---|---|---|---|
@@ -358,7 +444,7 @@ sjelden realistisk. Anbefalt tilnærming:
 **Maks SOC observert:** 77.4% (sol + nattlading)  
 **Profit loggede handler:** 0 kr (utlading kl 19-22 ble ikke logget — container rebuild kl 22:18 slettet forrige stats)
 
-### 9.2 Funn og problemstillinger
+### 10.2 Funn og problemstillinger
 
 **✅ Fungerer bra:**
 - Peak-shaving holder grid under 9.5 kW
