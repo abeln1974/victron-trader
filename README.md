@@ -8,7 +8,7 @@ Automatisk strømhandel og peak-shaving med Victron ESS. Kjøper strøm billig (
 |-----------|--------|
 | Cerbo GX | v3.72, IP 192.168.1.60, VRM site 411797 |
 | Invertere | 2× MultiPlus-II 48/5000/70-50 parallell |
-| Batteri | 4× 12.5kWh NMC = 50kWh (45.6 kWh målt SmartShunt 800Ah×57V), ekstern BMS |
+| Batteri | 4× 12kWh NMC Receel refurbished = 42.8kWh netto (45.6 kWh SmartShunt 800Ah×57V) |
 | Sol | Fronius Primo 5kW (AC-koblet, AC output) |
 | Grid-måler | Qubino ZMNHXD 3-fase (primær, via HA) |
 | Grid-måler fallback | VM-3P75CT via Victron Modbus (mangler L3 på IT-nett) |
@@ -139,7 +139,7 @@ docker compose run --rm victron-trader python optimizer.py
 | BATTERY_MAX_DISCHARGE_KW | 10 | Maks utladefart kW |
 | PEAK_LIMIT_KW | 9.5 | Peak-shaving grense kW |
 | PRICE_AREA | NO1 | Prisområde |
-| MIN_PRICE_DIFF_NOK | 0.10 | Min spread for arbitrasje (hev til 1.60 etter test) |
+| MIN_PRICE_DIFF_NOK | 1.10 | Min spread for arbitrasje (basert på Receel 60 000kr / 2000 sykler) |
 | SITE_LAT | 60.14 | Breddegrad for sol-prognose (Ringerike) |
 | SITE_LON | 10.25 | Lengdegrad for sol-prognose (Ringerike) |
 | SOLAR_MAX_KW | 5.0 | Sol-inverter maks effekt kW (Fronius Primo) |

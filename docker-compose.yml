@@ -24,7 +24,7 @@ services:
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
       
-      # Battery (Abelgard: 4x12.5kWh=50kWh NMC, 10kW max)
+      # Battery (Abelgard: 4x12kWh Receel NMC refurbished = 42.8kWh netto, 10kW max)
       # NMC: hold 20-90% for lang levetid (unngå langvarig >90% og <20%)
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-45.6}
       - BATTERY_MAX_CHARGE_KW=${BATTERY_MAX_CHARGE_KW:-10}
@@ -34,7 +34,7 @@ services:
       - MAX_SOC=${MAX_SOC:-90}
       
       # Strategy
-      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.60}
+      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.10}
       - FORECAST_HOURS=${FORECAST_HOURS:-24}
 
       # Sol-prognose (Open-Meteo MET Norway MEPS)
@@ -104,7 +104,7 @@ services:
       - SOLAR_EFFECTIVE_HOURS=${SOLAR_EFFECTIVE_HOURS:-4.0}
       - SITE_LAT=${SITE_LAT:-60.14}
       - SITE_LON=${SITE_LON:-10.25}
-      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.60}
+      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.10}
       - PEAK_LIMIT_KW=${PEAK_LIMIT_KW:-9.5}
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}

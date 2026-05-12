@@ -35,7 +35,7 @@ Cerbo GX (192.168.1.60)    Home Assistant
     ▼                          ├─ Qubino ZMNHXD (3-fase smartmåler)
 MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
     │
-    ├─ Batteri: 4×12.5kWh NMC (45.6 kWh brutto per SmartShunt 800Ah×57V)
+    ├─ Batteri: 4×12kWh NMC Receel (42.8 kWh netto, 45.6 kWh brutto SmartShunt)
     └─ Fronius Primo 5kW (AC-koblet sol)
 ```
 
@@ -45,13 +45,23 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 
 | Parameter | Verdi | Kilde |
 |---|---|---|
-| Kapasitet (brutto) | 45.6 kWh | SmartShunt: 800 Ah × 57 V |
-| Kapasitet (brutto oppgitt) | 4 × 12.5 kWh = 50 kWh | Victron spec |
+| Leverandør | Receel (Recertified Electronics AS) | receel.no |
+| Modell | 12kWh Batteri bank × 4 | refurbished NMC EV-celler |
+| Pris | 4 × 15 000 kr = **60 000 kr** | inkl BMS |
+| Garanti | 5 år | ingen sykkelgaranti oppgitt |
+| Kapasitet (netto per modul) | 10.7 kWh | Receel spec |
+| Kapasitet (netto total) | 4 × 10.7 = **42.8 kWh** | Receel spec |
+| Kapasitet (brutto SmartShunt) | 45.6 kWh | 800 Ah × 57 V målt |
+| Spenning nominell | 53 VDC | Receel spec |
+| Spenning max/min | 57.4 / 44.8 VDC | Receel spec |
+| Maks effekt kontinuerlig | 5 000 W | Receel spec |
+| Maks effekt peak | 10 000 W (2 sek) | Receel spec |
+| Vekt | 4 × 200 kg = 800 kg | Receel spec |
 | Max lading | 10 kW | 2× MultiPlus-II 48/5000 |
 | Max utlading | 10 kW | 2× MultiPlus-II 48/5000 |
 | Min SOC (kode) | 20 % | NMC konservativ (Victron floor: 10 %) |
 | Max SOC (kode) | 90 % | NMC levetid |
-| Brukbar kapasitet (20–90 %) | 31.9 kWh | 45.6 × 0.70 |
+| Brukbar kapasitet (20–90 %) | **30.0 kWh** | 42.8 × 0.70 |
 | Peak-reserve | 5 kWh | Alltid tilgjengelig for peak-shaving |
 | Virkningsgrad | 0.95 | Round-trip tap — inkluderer IKKE batterislitasje |
 | Sol | 5 kW Fronius Primo | AC-koblet |
@@ -273,15 +283,18 @@ Modbus, HA og SQLite-belastningen er godt innenfor hva komponentene tåler:
 `battery_efficiency=0.95` i koden dekker kun **round-trip tap** (varme).
 Den dekker **ikke** batterislitasje fra sykling.
 
-**Kostnad per syklus (Farco NMC 4×12.5kWh):**
+**Kostnad per syklus (Receel 4×12kWh refurbished NMC):**
 
-| Parameter | Verdi |
-|---|---|
-| Antatt batteriverdi | ~150 000 kr |
-| Antatt levetid (20–90% vindu) | ~3000 sykler |
-| Kostnad per ekvivalent syklus | 50 kr |
-| Brukbar energi per syklus | 31.9 kWh |
-| **Batterikostnad per kWh** | **~1.57 kr/kWh** |
+| Parameter | Verdi | Kilde |
+|---|---|---|
+| Batterikostnad | 60 000 kr | 4 × 15 000 kr (receel.no) |
+| Brukbar energi per syklus (20–90%) | 30.0 kWh | 42.8 kWh × 70% |
+| Levetid optimistisk | 2 500 sykler | NMC EV-celler godt vedlikeholdt |
+| Levetid realistisk | 2 000 sykler | Refurbished — usikker restlevetid |
+| Levetid pessimistisk | 1 500 sykler | Degraderte celler |
+| **Batterikostnad/kWh optimistisk** | **0.80 kr/kWh** | 60 000 / 2500 / 30.0 |
+| **Batterikostnad/kWh realistisk** | **1.00 kr/kWh** | 60 000 / 2000 / 30.0 |
+| **Batterikostnad/kWh pessimistisk** | **1.33 kr/kWh** | 60 000 / 1500 / 30.0 |
 
 ### 8.3 Arbitrasje — lønnsomhetsgrense
 
@@ -296,24 +309,24 @@ Kjøp natt:       72.7 øre inkl mva (fast, alltid)
 Salg dag:        spot eks mva (f.eks. 100 øre)
 Brutto spread:   100 − 72.7 = 27.3 øre
 Round-trip tap:  −3.6 øre (5%)
-Batterislitasje: −157.0 øre
+Batterislitasje: −100.0 øre  (realistisk 1.00 kr/kWh)
 ─────────────────────────────
-Netto: 27.3 − 3.6 − 157 = −133 øre → IKKE lønnsomt
+Netto: 27.3 − 3.6 − 100 = −76 øre → IKKE lønnsomt
 ```
 
 **Hva skal til for at arbitrasje lønner seg?**
 ```
-Nødvendig spot eks mva:  72.7 + 157 + 3.6 = 233 øre eks mva (≈ 291 øre inkl mva)
+Nødvendig spot eks mva:  72.7 + 100 + 3.6 = 176 øre eks mva (≈ 220 øre inkl mva)
 ```
-Spot må altså over **233 øre eks mva** bare for å gå i null på batterislitasje.
+Spot må altså over **176 øre eks mva** bare for å gå i null på batterislitasje.
 Det skjer noen dager om vinteren, ikke om sommeren.
 
-**Vinter-topp (spot 300 øre dag):**
+**Vinter-topp (spot 250 øre dag):**
 ```
-Spread: 300 − 72.7 = 227 øre − 157 slitasje = +70 øre → lønnsomt
+Spread: 250 − 72.7 = 177 øre − 100 slitasje − 3.6 tap = +73 øre → lønnsomt
 ```
 
-**Konklusjon:** Arbitrasje er kun lønnsomt ved **spot over ~233 øre eks mva**.
+**Konklusjon:** Arbitrasje er kun lønnsomt ved **spot over ~176 øre eks mva**.
 Typiske sommerdager (80–130 øre) gir negativt netto — ikke trade da.
 
 ### 8.4 Hva som faktisk er lønnsomt
@@ -322,20 +335,24 @@ Typiske sommerdager (80–130 øre) gir negativt netto — ikke trade da.
 |---|---|---|---|
 | Peak-shaving | Minimal | 243.7 kr/mnd | ✅ Klart lønnsomt |
 | Sol-selvforbruk | Ingen | Spart 81 øre/kWh | ✅ Klart lønnsomt |
-| Vinter-arbitrasje (spot >233 øre eks mva) | Lav (sjelden) | +70–200 øre netto | ✅ Lønnsomt |
-| Sommer-arbitrasje (spot 80–130 øre) | Medium | −100 til −130 øre netto | ❌ Ikke lønnsomt |
+| Vinter-arbitrasje (spot >176 øre eks mva) | Lav (sjelden) | +73–150 øre netto | ✅ Lønnsomt |
+| Sommer-arbitrasje (spot 80–130 øre) | Medium | −70 til −100 øre netto | ❌ Ikke lønnsomt |
 
 ### 8.5 Anbefalt konfigurasjon for batterilevetid
 
 `MIN_PRICE_DIFF_NOK=0.10` (10 øre) er for lavt — systemet trader for aggressivt.
 
-For å unngå destruktiv sykling bør arbitrasje kun trigge ved stor spread.
-Reell minimumsspread som dekker batterikostnad er ~90 øre, men dette er
-sjelden realistisk. Anbefalt tilnærming:
+Basert på Receel 60 000 kr / 2000 sykler / 30.0 kWh = **1.00 kr/kWh slitasje**:
 
-- **Hev `MIN_PRICE_DIFF_NOK` til 1.60+** — spot må over 233 øre eks mva for å dekke batterislitasje
+| Scenario | Slitasje | Terskel |
+|---|---|---|
+| Optimistisk (2500 sykler) | 0.80 kr/kWh | **0.95 kr** spread |
+| Realistisk (2000 sykler) | 1.00 kr/kWh | **1.10 kr** spread |
+| Pessimistisk (1500 sykler) | 1.33 kr/kWh | **1.45 kr** spread |
+
+- **Anbefalt `MIN_PRICE_DIFF_NOK=1.10`** — balanse mellom levetid og trading-muligheter
 - La peak-shaving og sol-selvforbruk gjøre hoveddelen av jobben
-- Arbitrasje trigges automatisk ved virkelig store prisspreader (vinter-topper etc.)
+- Arbitrasje trigges automatisk ved vinter-topper (spot >176 øre eks mva)
 
 > **For Windsurf/AI-assistenter:**
 > Ikke senk `MIN_PRICE_DIFF_NOK` uten å vurdere batterislitasje.
@@ -350,7 +367,7 @@ sjelden realistisk. Anbefalt tilnærming:
 
 | Post | Beløp |
 |---|---|
-| Batteri (4×12.5 kWh NMC, Farco) | ~150 000 kr |
+| Batteri (4×12 kWh NMC, Receel refurbished) | 60 000 kr |
 | Installasjon / inverter / annet | ~30 000 kr |
 | **Total investering** | **~180 000 kr** |
 | Antatt levetid (20–90% SOC-vindu) | 15 år / ~3000 sykler |
