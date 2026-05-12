@@ -48,7 +48,7 @@ def get_solar_kwh_tomorrow(lat: float, lon: float,
         times = data["hourly"]["time"]
         swrad = data["hourly"]["shortwave_radiation"]
 
-        tomorrow_str = (date.today().isoformat())
+        tomorrow_str = (date.today() + __import__('datetime').timedelta(days=1)).isoformat()
         # times starter kl 00:00 i dag = index 0, i morgen = index 24
         total_kwh = 0.0
         for i, t in enumerate(times):
