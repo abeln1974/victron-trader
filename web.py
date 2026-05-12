@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template_string
 
 from profit_tracker import ProfitTracker
 from price_fetcher import PriceFetcher
-from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK, GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE, FIXED_PRICE_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, is_day_tariff
+from tariff import buy_price_ore, sell_price_ore, CAPACITY_CHARGE_NOK, GRID_TARIFF_DAY_ORE, GRID_TARIFF_NIGHT_ORE, NORGESPRIS_CAP_ORE, CONSUMPTION_TAX_ORE, ENOVA_ORE, is_day_tariff
 from config import CONFIG, OSLO_TZ
 
 app = Flask(__name__)
