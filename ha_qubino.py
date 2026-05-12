@@ -306,7 +306,9 @@ class EVCSController:
         if not self.is_connected():
             return
 
-        # --- Scenario 1: Batteri selger → stopp EVCS helt ---
+        # --- Scenario 1: Trader selger aktivt (Mode 3) → stopp EVCS helt ---
+        # Merk: battery_kw < 0 i Mode 2 (sol-overskudd) skal IKKE stoppe EVCS —
+        # det er naturlig ESS-eksport, ikke aktiv trader-discharge.
         if battery_action == 'discharge':
             self.stop_charging()
             return
