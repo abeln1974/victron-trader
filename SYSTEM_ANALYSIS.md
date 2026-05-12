@@ -136,18 +136,22 @@ Eksempel dag: 115 − 81 = +34 øre > 10 øre → trigger
 ```
 
 ### 4.2 Natt-lading
-1. Lademål = `max_soc − solar_reserve_pct` (sol-reserve: 5kW × 4t = 20kWh = 44%)
-   - Normalt lademål om natten: ~46% SOC — sol tar resten på dagtid
+1. Lademål = `max_soc − solar_reserve_pct` (dynamisk fra Open-Meteo MEPS)
+   - Solrikt dag (prognose 29 kWh) → reserve 40% → lader til 50% SOC om natten
+   - Overskyet dag (prognose 8 kWh) → reserve 18% → lader til 72% SOC om natten
 2. Beregn behov med 20% buffer for peak-shaving-reduksjon
 3. Velg billigste nattetimer (22–06) — ingen lønnsomhetssjekk (billigst er alltid best)
 4. **Cap ladeeffekt mot live grid/peak-limit** — se seksjon 6.4
 
-**Sol-reserve logikk:**
+**Sol-reserve logikk (dynamisk fra 2026-05-12):**
 ```python
-solar_reserve_pct = min(40, (solar_max_kw × solar_effective_hours / capacity) × 100)
-charge_target_soc = max_soc − solar_reserve_pct  # typisk 90 − 44 = 46%
+# solar_forecast.py — Open-Meteo MET Norway MEPS 2.5 km
+solar_kwh_tomorrow = get_solar_kwh_tomorrow(lat, lon, panel_kw=5.0, eff=0.85)
+solar_reserve_pct = min(40, solar_kwh_tomorrow / capacity × 100)
+charge_target_soc = max_soc − solar_reserve_pct
+# Fallback ved API-feil: SOLAR_EFFECTIVE_HOURS=4.0 (statisk)
 ```
-> `SOLAR_EFFECTIVE_HOURS` kan justeres i `.env` — default 4 (mai-august Norge)
+> Koordinater settes via `SITE_LAT` / `SITE_LON` i `.env` (default: 60.14, 10.25 Ringerike)
 
 ### 4.3 Peak-shaving (kontinuerlig, hvert 10s)
 - Hvis grid > 9.5 kW → utlad fra batteri med `excess_kw`
@@ -467,8 +471,9 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 1. **`MIN_PRICE_DIFF_NOK` bør heves** — Default 0.10 kr fører til
    daglig sykling som sliter batteriet uten tilstrekkelig gevinst. Anbefalt: 0.50 kr.
 2. ~~**Peak-shaving kumulativ jaging**~~ — **FIKSET** 2026-05-12: `_original_charge_kw` lagres ved time-start og brukes som fast referanse i `_check_peak_shaving`. `current_action.power_kw` oppdateres ikke lenger.
-3. **Sol-reserve er statisk** — `SOLAR_EFFECTIVE_HOURS=4` er feil på overskyet dag.
-   Forbedring: hent værvarselprognoser (yr.no API) eller bruk YTD-snitt for måneden.
+3. ~~**Sol-reserve er statisk**~~ — **FIKSET** 2026-05-12: `solar_forecast.py` henter
+   sol-prognose per time fra Open-Meteo (MET Norway MEPS 2.5 km). Fallback til statisk
+   `SOLAR_EFFECTIVE_HOURS=4.0` ved API-feil.
 
 ### 🟡 Medium prioritet
 4. **Ingen re-planlegging intratime** — priser publiseres kl 13, men re-plan trigges
@@ -589,6 +594,9 @@ HA_TOKEN=<secret>
 | 2026-05-12 | tariff: fiks `__main__` (fjernet ugyldig `NORGES_PRICE_ORE`-referanse) |
 | 2026-05-12 | config: `evcs_phases` default 3 → 1 (EVCS er 1-fase) |
 | 2026-05-12 | tariff: Norgespris er pristak — `buy_price` alltid 40 øre eks mva (rettet fra feil min(spot,40)) |
+| 2026-05-12 | feat: `solar_forecast.py` — dynamisk sol-reserve via Open-Meteo MEPS (met.no 2.5km modell) |
+| 2026-05-12 | optimizer: statisk sol-reserve erstattet med `get_solar_reserve_pct()` fra `solar_forecast.py` |
+| 2026-05-12 | config: `SITE_LAT`, `SITE_LON`, `SOLAR_SYSTEM_EFFICIENCY` lagt til for lokasjon og sol-prognose |
 
 ---
 
@@ -598,7 +606,7 @@ HA_TOKEN=<secret>
 
 | System | Teknologi | Optimering | Sol-prognose | Modbus | Nordpool | Stars |
 |---|---|---|---|---|---|---|
-| **victron-trader (dette)** | Python, Docker | Topp-N greedy | Statisk reserve | ✅ Direkte | ✅ hvakosterstrommen.no | – |
+| **victron-trader (dette)** | Python, Docker | Topp-N greedy | ✅ Open-Meteo MEPS | ✅ Direkte | ✅ hvakosterstrommen.no | – |
 | **Victron Dynamic ESS** | Node-RED, VRM API | LP (server-side) | VRM/Solcast | ✅ VRM | ✅ Day-ahead EU | ~200 |
 | **EMHASS** | Python, HA add-on | LP (PuLP/linprog) | Open-Meteo/Solcast | ❌ Ingen | ✅ Via HA-sensor | ~1900 |
 | **Battery-Storage-Optimizer** | Python, Pyomo | LP (Pyomo/GLPK) | Ingen | ❌ Ingen | ❌ Generisk | ~50 |
@@ -671,7 +679,7 @@ av de sammenlignbare systemene**:
 ```
 **Kompleksitet:** Medium — `scipy` er allerede tilgjengelig, ingen nye avhengigheter.
 
-#### 🌟 Idé 2: Sol-prognoser via Open-Meteo med MET Norway-modell
+#### ✅ Idé 2: Sol-prognoser via Open-Meteo med MET Norway-modell — **IMPLEMENTERT 2026-05-12**
 **Fra:** EMHASS  
 **Bakgrunn — er Open-Meteo bra for Norge?**
 
