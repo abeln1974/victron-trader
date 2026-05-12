@@ -51,7 +51,7 @@ class Config:
     evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (EVCS HQ2309VTVNF er 1-fase)
 
     # Strategy
-    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "0.10"))
+    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.60"))  # Arbitrasje lønnsomt kun ved spot >233 øre eks mva
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))
 
     # Paths
