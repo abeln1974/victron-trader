@@ -355,9 +355,7 @@ sjelden realistisk. Anbefalt tilnærming:
 ### 🔴 Høy prioritet
 1. **`MIN_PRICE_DIFF_NOK` bør heves** — Default 0.10 kr fører til
    daglig sykling som sliter batteriet uten tilstrekkelig gevinst. Anbefalt: 0.50 kr.
-2. **Peak-shaving kumulativ jaging under lading** — `_check_peak_shaving` oppdaterer
-   `current_action.power_kw` slik at neste sjekk bruker redusert verdi som ny base.
-   Fiks: bruk `original_charge_kw` (fra action ved time-start) som referanse, ikke løpende verdi.
+2. ~~**Peak-shaving kumulativ jaging**~~ — **FIKSET** 2026-05-12: `_original_charge_kw` lagres ved time-start og brukes som fast referanse i `_check_peak_shaving`. `current_action.power_kw` oppdateres ikke lenger.
 3. **Sol-reserve er statisk** — `SOLAR_EFFECTIVE_HOURS=4` er feil på overskyet dag.
    Forbedring: hent værvarselprognoser (yr.no API) eller bruk YTD-snitt for måneden.
 
@@ -479,3 +477,6 @@ HA_TOKEN=<secret>
 | 2026-05-12 | Optimizer: sol-reserve 44% (5kW × 4t) — lader til ~46% SOC om natten |
 | 2026-05-12 | Optimizer: discharge sortert på salgspris (spot), ikke raw_buy (fast) |
 | 2026-05-12 | Optimizer: discharge begrenset til dagtid 06–22 |
+| 2026-05-12 | main: fiks kumulativ peak-shaving jaging via `_original_charge_kw` |
+| 2026-05-12 | tariff: fiks `__main__` (fjernet ugyldig `NORGES_PRICE_ORE`-referanse) |
+| 2026-05-12 | config: `evcs_phases` default 3 → 1 (EVCS er 1-fase) |
