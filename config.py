@@ -21,8 +21,10 @@ class Config:
     vat: float = float(os.getenv("VAT", "1.25"))
 
     # Battery
-    # SmartShunt: 800Ah × 57V (charged) = 45.6 kWh brutto
-    # Discharge floor 10% (Victron), men vi bruker 20% for NMC-levetid
+    # Receel 4×12kWh NMC refurbished: netto 42.8 kWh (4 × 10.7 kWh per modul)
+    # SmartShunt måler brutto 45.6 kWh (800 Ah × 57 V) — brukes i SOC-beregninger
+    # fordi SOC% fra Victron er basert på brutto SmartShunt-kapasitet.
+    # Brukbar (20-90%): 45.6 × 0.70 = 31.9 kWh. Netto (Receel spec): 42.8 × 0.70 = 30.0 kWh.
     battery_capacity_kwh: float = float(os.getenv("BATTERY_CAPACITY_KWH", "45.6"))
     battery_max_charge_kw: float = float(os.getenv("BATTERY_MAX_CHARGE_KW", "10"))
     battery_max_discharge_kw: float = float(os.getenv("BATTERY_MAX_DISCHARGE_KW", "10"))
@@ -51,7 +53,7 @@ class Config:
     evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (EVCS HQ2309VTVNF er 1-fase)
 
     # Strategy
-    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.60"))  # Arbitrasje lønnsomt kun ved spot >233 øre eks mva
+    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.10"))  # Arbitrasje lønnsomt kun ved spot >233 øre eks mva
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))
 
     # Paths

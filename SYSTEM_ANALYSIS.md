@@ -482,11 +482,11 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 
 ---
 
-## 10. Kjente svakheter / forbedringspotensial
+## 11. Kjente svakheter / forbedringspotensial
 
 ### 🔴 Høy prioritet
-1. **`MIN_PRICE_DIFF_NOK` bør heves** — Default 0.10 kr fører til
-   daglig sykling som sliter batteriet uten tilstrekkelig gevinst. Anbefalt: 0.50 kr.
+1. ~~**`MIN_PRICE_DIFF_NOK` bør heves**~~ — **FIKSET** 2026-05-12: Satt til **1.10 kr** basert på
+   Receel 60 000 kr / 2000 sykler / 30.0 kWh = 1.00 kr/kWh slitasje.
 2. ~~**Peak-shaving kumulativ jaging**~~ — **FIKSET** 2026-05-12: `_original_charge_kw` lagres ved time-start og brukes som fast referanse i `_check_peak_shaving`. `current_action.power_kw` oppdateres ikke lenger.
 3. ~~**Sol-reserve er statisk**~~ — **FIKSET** 2026-05-12: `solar_forecast.py` henter
    sol-prognose per time fra Open-Meteo (MET Norway MEPS 2.5 km). Fallback til statisk

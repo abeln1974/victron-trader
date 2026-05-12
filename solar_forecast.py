@@ -106,8 +106,8 @@ def get_solar_reserve_pct(lat: float, lon: float,
 if __name__ == "__main__":
     import logging
     logging.basicConfig(level=logging.INFO)
-    lat = float(CONFIG.__dict__.get("solar_lat", 60.14))
-    lon = float(CONFIG.__dict__.get("solar_lon", 10.25))
+    lat = CONFIG.site_lat
+    lon = CONFIG.site_lon
     kwh = get_solar_kwh_tomorrow(lat, lon, CONFIG.solar_max_kw)
     reserve = get_solar_reserve_pct(lat, lon, CONFIG.solar_max_kw, CONFIG.battery_capacity_kwh)
     print(f"Sol i morgen: {kwh:.1f} kWh")
