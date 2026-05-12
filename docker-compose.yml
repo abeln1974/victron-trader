@@ -34,8 +34,15 @@ services:
       - MAX_SOC=${MAX_SOC:-90}
       
       # Strategy
-      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-0.30}
+      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.60}
       - FORECAST_HOURS=${FORECAST_HOURS:-24}
+
+      # Sol-prognose (Open-Meteo MET Norway MEPS)
+      - SITE_LAT=${SITE_LAT:-60.14}
+      - SITE_LON=${SITE_LON:-10.25}
+      - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
+      - SOLAR_SYSTEM_EFFICIENCY=${SOLAR_SYSTEM_EFFICIENCY:-0.85}
+      - SOLAR_EFFECTIVE_HOURS=${SOLAR_EFFECTIVE_HOURS:-4.0}
       
       # Home Assistant - Qubino primærkilde grid (alle 3 faser IT-nett)
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
@@ -93,6 +100,12 @@ services:
       - MIN_SOC=${MIN_SOC:-20}
       - MAX_SOC=${MAX_SOC:-90}
       - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
+      - SOLAR_SYSTEM_EFFICIENCY=${SOLAR_SYSTEM_EFFICIENCY:-0.85}
+      - SOLAR_EFFECTIVE_HOURS=${SOLAR_EFFECTIVE_HOURS:-4.0}
+      - SITE_LAT=${SITE_LAT:-60.14}
+      - SITE_LON=${SITE_LON:-10.25}
+      - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.60}
+      - PEAK_LIMIT_KW=${PEAK_LIMIT_KW:-9.5}
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}
       - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
