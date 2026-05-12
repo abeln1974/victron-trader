@@ -281,14 +281,31 @@ class EnergyTrader:
                     self.victron.set_charge_power(new_charge_kw)
                     # IKKE oppdater current_action.power_kw — behold original som referanse
             else:
-                action = self.optimizer.peak_shave(grid_kw, soc)
-                if action:
-                    logger.warning(
-                        f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW — "
-                        f"utlader {abs(action.power_kw):.1f}kW"
-                    )
-                    self.victron.set_discharge_power(abs(action.power_kw))
-                    self.current_action = action
+                # Beregn nødvendig utlading for å komme under peak_limit
+                # Unngå å utlade mer enn nødvendig (forhindrer eksport til nett)
+                needed_discharge_kw = max(0.0, round(grid_kw - peak_kw + 0.3, 1))
+                
+                # Ikke utlad mer enn nødvendig, og maks 10kW
+                discharge_kw = min(needed_discharge_kw, 10.0)
+                
+                if discharge_kw < 0.5:
+                    logger.debug(f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW, men for lite til utlading ({discharge_kw:.1f}kW)")
+                    return
+                
+                logger.warning(
+                    f"PEAK-SHAVING: Grid {grid_kw:.1f}kW > {peak_kw}kW — "
+                    f"utlader {discharge_kw:.1f}kW (minimum nødvendig)"
+                )
+                self.victron.set_discharge_power(discharge_kw)
+                
+                # Lagre action for tracking
+                self.current_action = Action(
+                    timestamp=datetime.now(OSLO_TZ),
+                    action='peak_shave',
+                    power_kw=-discharge_kw,
+                    expected_profit_nok=0.0,
+                    reason=f'Grid {grid_kw:.1f}kW > {peak_kw}kW minimum shave'
+                )
         except Exception as e:
             logger.debug(f"Peak-shave feilet: {e}")
 
