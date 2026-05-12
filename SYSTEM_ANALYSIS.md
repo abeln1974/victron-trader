@@ -509,7 +509,7 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 
 ---
 
-## 11. Filstruktur
+## 12. Filstruktur
 
 | Fil | Ansvar |
 |---|---|
@@ -532,7 +532,7 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 
 ---
 
-## 12. Konfigurasjon (miljøvariabler)
+## 13. Konfigurasjon (miljøvariabler)
 
 ```env
 # Victron
@@ -566,7 +566,7 @@ ENOVA_ORE=1.00
 CAPACITY_CHARGE_NOK=662.50
 
 # Strategi — arbitrasje kun lønnsomt ved spot >233 øre eks mva
-MIN_PRICE_DIFF_NOK=1.60     # Anbefalt minimum — dekker batterislitasje (se seksjon 8.3)
+MIN_PRICE_DIFF_NOK=1.10     # Realistisk minimum — Receel 60 000kr/2000sykler/30kWh (se seksjon 8.5)
 
 # Home Assistant
 HA_URL=https://homeassistant.abelgaard.no
@@ -575,17 +575,17 @@ HA_TOKEN=<secret>
 
 ---
 
-## 13. Huskelapper / Planlagte endringer
+## 14. Huskelapper / Planlagte endringer
 
 | Dato | Gjør dette | Prioritet |
 |---|---|---|
-| **~2026-05-21** | Hev `MIN_PRICE_DIFF_NOK` fra 0.10 → **1.60** i `.env` etter testperiode. Se seksjon 8.3. | 🔴 Høy |
+| **2026-05-12** | `MIN_PRICE_DIFF_NOK` satt til **1.10** basert på Receel batterikostnad (se seksjon 8.5). | ✅ Ferdig |
 | **Snart** | Verifiser re-planlegging kl 13 ved prisoppdatering faktisk trigges | 🟡 Medium |
 | **Fremtid** | Yr.no værvarsler for adaptiv sol-reserve | 🟢 Lav |
 
 ---
 
-## 14. Endringslogg (teknisk)
+## 15. Endringslogg (teknisk)
 
 | Dato | Endring |
 |---|---|
@@ -617,9 +617,9 @@ HA_TOKEN=<secret>
 
 ---
 
-## 15. Sammenligning med andre open-source systemer
+## 16. Sammenligning med andre open-source systemer
 
-### 15.1 Oversikt over sammenlignbare prosjekter
+### 16.1 Oversikt over sammenlignbare prosjekter
 
 | System | Teknologi | Optimering | Sol-prognose | Modbus | Nordpool | Stars |
 |---|---|---|---|---|---|---|
@@ -628,7 +628,7 @@ HA_TOKEN=<secret>
 | **EMHASS** | Python, HA add-on | LP (PuLP/linprog) | Open-Meteo/Solcast | ❌ Ingen | ✅ Via HA-sensor | ~1900 |
 | **Battery-Storage-Optimizer** | Python, Pyomo | LP (Pyomo/GLPK) | Ingen | ❌ Ingen | ❌ Generisk | ~50 |
 
-### 15.2 Victron Dynamic ESS (offisiell, Node-RED)
+### 16.2 Victron Dynamic ESS (offisiell, Node-RED)
 **GitHub:** `victronenergy/dynamic-ess`
 
 Victrons egen implementasjon som kjører i Node-RED på Cerbo GX / VRM.
@@ -651,7 +651,7 @@ Victrons egen implementasjon som kjører i Node-RED på Cerbo GX / VRM.
 > **Interessant:** Dynamic ESS bruker `buy price > max_sell_price − battery_cycle_cost` for å
 > stoppe unødvendig trading — samme logikk som `MIN_PRICE_DIFF_NOK` her, men dynamisk beregnet.
 
-### 15.3 EMHASS (Energy Management for Home Assistant)
+### 16.3 EMHASS (Energy Management for Home Assistant)
 **GitHub:** `davidusb-geek/emhass` — ~1900 stars, aktivt vedlikeholdt
 
 Mest populære open-source home energy optimizer. Kjører som HA add-on.
@@ -669,7 +669,7 @@ Mest populære open-source home energy optimizer. Kjører som HA add-on.
 - Ingen EVCS-koordinering out-of-the-box
 - Mer kompleks å sette opp (mange konfig-parametre)
 
-### 15.4 Hva dette systemet gjør unikt bra
+### 16.4 Hva dette systemet gjør unikt bra
 
 Etter gjennomgang er det klart at `victron-trader` har noen egenskaper som **ikke finnes i noen
 av de sammenlignbare systemene**:
@@ -680,7 +680,7 @@ av de sammenlignbare systemene**:
 4. **Sol-selvforbruk + batteri-reserve** — reserverer plass til Fronius-produksjon om natten
 5. **Direkte Modbus-TCP** — ingen HA-avhengighet, lavere latens, fungerer offline
 
-### 15.5 Inspirasjon fra andre systemer — mulige forbedringer
+### 16.5 Inspirasjon fra andre systemer — mulige forbedringer
 
 #### 🌟 Idé 1: Linear Programming istedenfor Greedy Topp-N
 **Fra:** EMHASS og Dynamic ESS  
@@ -726,8 +726,8 @@ av de sammenlignbare systemene**:
 **Gevinst:** Sommer: høy terskel (ingen unødvendig trading). Vinter: lav terskel (mer aggressiv).
 ```python
 # Auto-beregn basert på måneden:
-# Jun-Aug: min_diff = 1.60 kr (spot sjelden over 233 øre)
-# Sep-Mai: min_diff = 0.50 kr (mer sjanse for topp-priser)
+# Jun-Aug: min_diff = 1.10 kr (gjeldende verdi — spot sjelden over 176 øre eks mva)
+# Sep-Mai: min_diff = 0.80 kr (mer aggressiv — optimistisk sykkel-scenario)
 ```
 
 #### 🌟 Idé 4: Lastprognose for EVCS (fra EMHASS-konseptet)
@@ -735,7 +735,7 @@ av de sammenlignbare systemene**:
 **Hva:** Sjekk om elbil er tilkoblet og plan elbil-lading til billigste nattetimer.  
 **Gevinst:** Elbilen lades alltid på billigste tidspunkt innenfor peak-grensen.
 
-### 15.6 Vurdering
+### 16.6 Vurdering
 
 **Konklusjon:** `victron-trader` er et **over gjennomsnittlig godt system** for sin use case.
 Det er mer spesialisert enn de generiske systemene (EMHASS) og mer tilpasset norske forhold
