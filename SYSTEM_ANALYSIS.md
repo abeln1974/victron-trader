@@ -1,6 +1,6 @@
 # Victron Energy Trader — Systemanalyse
 
-> Sist oppdatert: 2026-05-11
+> Sist oppdatert: 2026-05-12
 > Repository: `gitea.abelgaard.no/lars/victron-trader` (branch: master)
 > Installasjon: Abelgård, Ringerike — NO1 prisområde
 
@@ -67,24 +67,22 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 
 ## 3. Prisstruktur (Føie AS / Kraftriket, april 2026)
 
-### Kjøpspris (eks mva, deretter ×1.25)
+### Kjøpspris — FASTPRIS (eks mva, deretter ×1.25)
 ```
-Spotpris (variabel, eks mva)
-+ Kraftriket påslag:    6.50 øre/kWh
+Fastpris Kraftriket:    40.00 øre/kWh  (eks mva)
 + Nettleie dag (06–22): 16.50 øre/kWh  → 20.63 inkl mva
 + Nettleie natt (22–06):10.00 øre/kWh  → 12.50 inkl mva
-+ Forbruksavgift:        7.13 øre/kWh  → 8.91 inkl mva
-+ Enova:                 1.00 øre/kWh  → 1.25 inkl mva
++ Forbruksavgift:        7.13 øre/kWh  →  8.91 inkl mva
++ Enova:                 1.00 øre/kWh  →  1.25 inkl mva
 × 1.25 mva
-− Norgespris:           96.53 øre/kWh  (ingen mva, statlig støtte)
-= Total reell kjøpspris
+= Dag-kjøpspris:  ~81.0 øre/kWh inkl mva
+= Natt-kjøpspris: ~72.7 øre/kWh inkl mva
 ```
+> Norgespris gjelder IKKE — fastprisavtale gir ikke rett til støtten (kun spot > 73 øre)
 
-### Salgspris (plusskunde, ingen mva)
+### Salgspris (plusskunde, spot eks mva)
 ```
-Kraftriket betaler:  75.00 øre/kWh
-− Føie tilbakebetaling: 6.25 øre/kWh
-= Netto salgspris:   68.75 øre/kWh
+Spotpris Nordpool NO1 eks mva  (variabel, ingen påslag eller fradrag)
 ```
 
 ### Kapasitetsledd (Føie AS 2026, inkl mva)
@@ -102,40 +100,39 @@ Kraftriket betaler:  75.00 øre/kWh
 - **Peak-shaving grense:** 9.5 kW (0.5 kW buffer til 10 kW-trinnet)
 - **Besparelse Trinn 4→3:** 662.5 − 418.8 = **243.7 kr/mnd**
 
-> **Merk — Norgespris i trading-beslutninger:**
-> `should_discharge()` ekskluderer Norgespris fra spread-beregningen (korrekt).
-> `buy_price_ore()` inkluderer Norgespris-fradraget (brukes til dashboard-visning).
-> Dashboardet kan derfor vise negativ "reell kjøpspris" og likevel trigge utlading —
-> dette er tilsiktet og matematisk riktig.
+> **Merk:** Spread = salgspris − kjøpspris. Positivt spread = lønnsomt å selge.
+> `should_discharge()` og `web.py` bruker begge `sell - buy` (korrekt etter 2026-05-11 fix).
 
 ---
 
 ## 4. Optimaliseringsstrategi
 
 ### 4.1 Utlading (salg)
-1. Hent priser for neste 24 timer
-2. Beregn **råkjøpspris** for hver time (spot + alle avgifter eks Norgespris)
-3. Sorter etter høyeste råkjøpspris, filtrer på median-terskel
-4. Tildel batterikapasitet til topp-timene inntil batteri er tomt (20% min SOC − 5 kWh reserve)
-5. **Resultat:** plan selger i de mest lønnsomme timene
+1. Hent priser for neste 24 timer (evt 36t hvis i morgen er tilgjengelig)
+2. Planlegg med `planned_soc = max(current_soc, max_soc)` — anta full nattlading
+3. Beregn usable kWh fra `planned_soc` ned til `min_soc − peak_reserve`
+4. Sorter lønnsomme **dagtimer** (06–22) etter høyeste spotpris, ta topp-N til batteri er tomt
+5. **Resultat:** selger kun i de dyreste dagtimene — natt reserveres for lading
 
 **Lønnsomhetskrav utlading:**
 ```
-råkjøpspris > salgspris × efficiency
-(spot eks mva + avgifter) × mva > 68.75 × 0.95 = 65.3 øre
+sell_ore(spot) − buy_price_ore(spot, hour) > min_price_diff_nok × 100
+Eksempel dag: 115 − 81 = +34 øre > 10 øre → trigger
 ```
 
 ### 4.2 Natt-lading
-1. Etter utladingsplan er beregnet: estimér SOC etter planlagt utlading
-2. Finn billigste nattetimer (22–06) under lønnsomhetsterskel
-3. Tildel ladekapasitet opp til 90% SOC
-4. **Cap ladeeffekt mot peak-limit** — se seksjon 6.4
+1. Lademål = `max_soc − solar_reserve_pct` (sol-reserve: 5kW × 4t = 20kWh = 44%)
+   - Normalt lademål om natten: ~46% SOC — sol tar resten på dagtid
+2. Beregn behov med 20% buffer for peak-shaving-reduksjon
+3. Velg billigste nattetimer (22–06) — ingen lønnsomhetssjekk (billigst er alltid best)
+4. **Cap ladeeffekt mot live grid/peak-limit** — se seksjon 6.4
 
-**Lønnsomhetskrav lading:**
+**Sol-reserve logikk:**
+```python
+solar_reserve_pct = min(40, (solar_max_kw × solar_effective_hours / capacity) × 100)
+charge_target_soc = max_soc − solar_reserve_pct  # typisk 90 − 44 = 46%
 ```
-kjøpspris < salgspris × efficiency
-kjøpspris < 65.3 øre
-```
+> `SOLAR_EFFECTIVE_HOURS` kan justeres i `.env` — default 4 (mai-august Norge)
 
 ### 4.3 Peak-shaving (kontinuerlig, hvert 10s)
 - Hvis grid > 9.5 kW → utlad fra batteri med `excess_kw`
@@ -272,27 +269,32 @@ Den dekker **ikke** batterislitasje fra sykling.
 For at arbitrasje skal være lønnsomt må spread dekke batterikostnad + round-trip tap:
 
 ```
-Salgspris:          68.75 øre/kWh
-Round-trip tap 5%:  −3.44 øre/kWh
-Batterislitasje:  −157.0 øre/kWh
-─────────────────────────────────
-Minimum kjøpspris for lønnsomhet: 68.75 − 3.44 − 157.0 = negativt
+Salgspris (spot, eks mva, typisk mai):   ~110 øre/kWh
+Round-trip tap 5%:                        −5.5 øre/kWh
+Batterislitasje:                        −157.0 øre/kWh
+──────────────────────────────────────────────────────
+Netto per kWh:   110 − 5.5 − 157 = −52 øre  → IKKE lønnsomt
 ```
 
-**Konklusjon: Ren daglig arbitrasje (full syklus) er IKKE lønnsomt** med dagens
-salgspris på 68.75 øre. Batterislitasjen overstiger arbitrasje-gevinsten.
+Med fastpris kjøp (81 øre dag) og spot-salg (110 øre) er **brutto spread ~29 øre**.
+Dette dekker IKKE batterislitasje på 157 øre/kWh.
 
-Arbitrasje er kun lønnsomt ved **ekstreme prisforskjeller** — spot over ~200 øre
-på dagtid vs natt under 20 øre — og bør ikke kjøres daglig.
+**Unntak: vinter-topper** — spot over ~300 øre og natt under 73 øre gir:
+```
+300 − 5% − 73 = +212 øre brutto spread
+212 − 157 = +55 øre netto → lønnsomt
+```
+**Konklusjon:** Arbitrasje er kun lønnsomt ved **ekstreme vinterdager**.
+Daglig sommer-arbitrasje sliter batteriet uten tilstrekkelig gevinst.
 
 ### 8.4 Hva som faktisk er lønnsomt
 
 | Strategi | Batterislitasje | Gevinst | Vurdering |
 |---|---|---|---|
 | Peak-shaving | Minimal (liten energi, korte perioder) | 243.7 kr/mnd | ✅ Klart lønnsomt |
-| Sol-selvforbruk | Ingen (sol lader, batteri buffer) | Spart kjøpspris | ✅ Klart lønnsomt |
-| Selektiv arbitrasje (ekstreme dager) | Lav (sjelden) | Variabel | ✅ Lønnsomt ved stor spread |
-| Daglig full arbitrasje | Høy (365 sykler/år) | Lav | ❌ Ikke lønnsomt |
+| Sol-selvforbruk | Ingen (sol lader, batteri buffer) | Spart kjøpspris (81 øre/dag) | ✅ Klart lønnsomt |
+| Vinter-topp arbitrasje (spot >250 øre) | Lav (sjelden) | +50–150 øre/kWh netto | ✅ Lønnsomt |
+| Sommer-arbitrasje (spot 100–130 øre) | Medium | ~29 øre brutto − 157 øre slitasje | ❌ Ikke lønnsomt |
 
 ### 8.5 Anbefalt konfigurasjon for batterilevetid
 
@@ -313,30 +315,70 @@ sjelden realistisk. Anbefalt tilnærming:
 
 ---
 
-## 9. Kjente svakheter / forbedringspotensial
+## 9. Driftsanalyse — Natt 11–12 mai 2026 (første natt)
 
-### 🔴 Høy prioritet
-1. **`MIN_PRICE_DIFF_NOK` bør heves** — se seksjon 8.5. Default 0.10 kr fører til
-   daglig sykling som sliter batteriet uten tilstrekkelig gevinst.
+### 9.1 Observasjoner fra logger
 
-### 🟡 Medium prioritet
-2. **Negativ reell kjøpspris trigger ikke alltid lading** — ved høy Norgespris-støtte kan
-   reell kjøpspris bli negativ. `should_charge()` er profittpris-basert og lader ikke
-   aggressivt nok i disse timene. Vurder å legge til spesialhåndtering.
-3. **Ingen re-planlegging intratime** — hvis priser publiseres kl 13 oppdateres ikke planen
-   før neste time-syklus. Bør trigge re-plan ved prisoppdatering.
-4. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100` antar
-   lineær SOC. Bør hente direkte fra SmartShunt via Modbus for nøyaktighet.
-5. **EVCS støtter kun én lader** — to separate ladere håndteres ikke.
+| Tid | SOC | Grid | Handling | Status |
+|---|---|---|---|---|
+| 22:18 | 28.1% | 8441W | Lading cappet 8→3.9kW | Peak-cap virker ✅ |
+| 00:28 | 40.8% | 10300W | PEAK-SHAVING: 8→7.2→6.4→5.6kW | Jaging (se nedenfor) |
+| 01:00 | 45.8% | 6594W | Lading 2.9kW | Lavt forbruk |
+| 03:00 | 52.9% | 3113W | Lading 6.4kW | Normalt |
+| 06:00 | – | – | idle — sol 0.06 kW | Korrekt |
+| 08:00 | – | – | idle — sol 1.12 kW lader gratis | Sol-selvforbruk ✅ |
+| 11:00 | 70.9% | 1763W | idle — sol 4.22 kW lader gratis | Sol på vei mot topp ✅ |
 
-### 🟢 Lav prioritet
-6. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
-7. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
-8. **Profitt-dashboard viser kun dagens handler** — ingen ukes/måneds-graf.
+**Maks grid-import natt:** 9002W — under 9500W peak-grense ✅  
+**Maks SOC observert:** 77.4% (sol + nattlading)  
+**Profit loggede handler:** 0 kr (utlading kl 19-22 ble ikke logget — container rebuild kl 22:18 slettet forrige stats)
+
+### 9.2 Funn og problemstillinger
+
+**✅ Fungerer bra:**
+- Peak-shaving holder grid under 9.5 kW
+- Sol-selvforbruk: 4.2 kW kl 11 lader gratis uten grid-import
+- Discharge på kveld (19-21) med +30 øre margin trigget korrekt
+- EVCS stoppes under discharge, gjenopptas under idle/charge
+- Fastpris + avgifter = 81 øre dag / 73 øre natt beregnes korrekt
+
+**⚠️ Forbedringsområder (nye funn):**
+- **Peak-shaving jager under lading** (kl 00:28): reduserte 8→7.2→6.4→5.6kW på 24s. Hysterese på 0.3 kW lagt til, men grunnproblemet er at `current_action.power_kw` oppdateres kumulativt — andre gang sjekker den feil referansepunkt
+- **Lading for langsom** — SOC bare 77% etter 13 timer (22:18–11:10). Skyldes EVCS (3.7kW) som konkurrerer om kapasitet og peak-shaving som reduserer ladeeffekt. Batteriet når kanskje ikke lademålet
+- **Sol-reserve beregning er statisk** — 4 effektive timer er gjetning. En skyet dag lader ikke sol 20 kWh, og batteriet starter da for lavt på kvelden
+- **Profit-logging starter ikke fra 0** — container rebuild fører til at første natt ikke er loggført. Vurder å skrive oppstart-tidspunkt til DB
 
 ---
 
-## 10. Filstruktur
+## 10. Kjente svakheter / forbedringspotensial
+
+### 🔴 Høy prioritet
+1. **`MIN_PRICE_DIFF_NOK` bør heves** — Default 0.10 kr fører til
+   daglig sykling som sliter batteriet uten tilstrekkelig gevinst. Anbefalt: 0.50 kr.
+2. **Peak-shaving kumulativ jaging under lading** — `_check_peak_shaving` oppdaterer
+   `current_action.power_kw` slik at neste sjekk bruker redusert verdi som ny base.
+   Fiks: bruk `original_charge_kw` (fra action ved time-start) som referanse, ikke løpende verdi.
+3. **Sol-reserve er statisk** — `SOLAR_EFFECTIVE_HOURS=4` er feil på overskyet dag.
+   Forbedring: hent værvarselprognoser (yr.no API) eller bruk YTD-snitt for måneden.
+
+### 🟡 Medium prioritet
+4. **Ingen re-planlegging intratime** — priser publiseres kl 13, men re-plan trigges
+   nå kun ved `_last_price_count`-endring. Verifiser at dette faktisk virker.
+5. **SOC-basert kWh-logging er approx** — `actual_kwh = capacity × delta_soc / 100`
+   er unøyaktig. Bør hente direkte fra SmartShunt (Modbus reg 309: kWh discharged).
+6. **Lademål nås ikke alltid** — peak-shaving og EVCS konkurrerer om kapasitet om natten.
+   Optimizer bør velge flere nattimer enn nødvendig som buffer (20% buffer lagt til, men
+   EVCS-forbruk er ikke inkludert i beregningen).
+7. **EVCS støtter kun én lader** — to separate ladere håndteres ikke.
+
+### 🟢 Lav prioritet
+8. **Dashboard viser ikke EVCS-status** — `web.py` har ingen EVCS-widget.
+9. **Ingen alarm ved Qubino Z-Wave "dead"** — koden logger warning men sender ikke varsel.
+10. **Profitt-dashboard mangler ukes/måneds-graf** — kun dagens handler vises.
+
+---
+
+## 11. Filstruktur
 
 | Fil | Ansvar |
 |---|---|
@@ -359,7 +401,7 @@ sjelden realistisk. Anbefalt tilnærming:
 
 ---
 
-## 11. Konfigurasjon (miljøvariabler)
+## 12. Konfigurasjon (miljøvariabler)
 
 ```env
 # Victron
@@ -404,20 +446,18 @@ HA_TOKEN=<secret>
 
 ---
 
-## 12. Huskelapper / Planlagte endringer
+## 13. Huskelapper / Planlagte endringer
 
 | Dato | Gjør dette | Prioritet |
 |---|---|---|
 | **~2026-05-21** | Hev `MIN_PRICE_DIFF_NOK` fra 0.10 → 0.50 i `.env` etter testperiode. Se seksjon 8.5. | 🔴 Høy |
-
-> **Bakgrunn MIN_PRICE_DIFF_NOK:**
-> 0.10 brukes nå for å verifisere at alt fungerer (trading trigges, handler logges, EVCS koordineres).
-> Etter 10 dager: bekreft at handler er korrekte i dashboardet, så hev til 0.50–0.80 for å
-> beskytte batterilevetid. Daglig arbitrasje ved 0.10 sliter batteriet uten tilstrekkelig gevinst.
+| **Snart** | Fiks kumulativ peak-shaving jaging — bruk `original_charge_kw` som referanse | 🔴 Høy |
+| **Snart** | Verifiser re-planlegging kl 13 ved prisoppdatering faktisk trigges | 🟡 Medium |
+| **Fremtid** | Yr.no værvarsler for adaptiv sol-reserve | 🟢 Lav |
 
 ---
 
-## 13. Endringslogg (teknisk)
+## 14. Endringslogg (teknisk)
 
 | Dato | Endring |
 |---|---|
@@ -429,3 +469,13 @@ HA_TOKEN=<secret>
 | 2026-05-11 | SQLite `datetime('now', 'localtime')` for korrekt Oslo-tid |
 | 2026-05-11 | Seksjon 8: batterilevetid og lønnsomhetsanalyse lagt til |
 | 2026-05-11 | `MIN_PRICE_DIFF_NOK` anbefaling hevet til 0.50-0.80 |
+| 2026-05-11 | Prismodell rettet: fastpris kjøp (40 øre) + avgifter, salg = spot eks mva |
+| 2026-05-11 | Norgespris fjernet fra buy_price_ore (gjelder ikke fastprisavtale) |
+| 2026-05-11 | Margin-logikk rettet: sell−buy (positivt = lønnsomt å selge) |
+| 2026-05-11 | should_discharge: spread = sell−buy (var buy−sell = alltid negativ) |
+| 2026-05-11 | Peak-shaving: reduserer ladeeffekt under lading (ikke utlading) |
+| 2026-05-11 | Peak-shaving: 0.3 kW hysterese mot jaging |
+| 2026-05-12 | Optimizer: planned_soc = max_soc for discharge-planlegging |
+| 2026-05-12 | Optimizer: sol-reserve 44% (5kW × 4t) — lader til ~46% SOC om natten |
+| 2026-05-12 | Optimizer: discharge sortert på salgspris (spot), ikke raw_buy (fast) |
+| 2026-05-12 | Optimizer: discharge begrenset til dagtid 06–22 |
