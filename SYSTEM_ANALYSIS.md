@@ -458,10 +458,7 @@ ENOVA_ORE=1.00
 CAPACITY_CHARGE_NOK=662.50
 
 # Strategi — arbitrasje kun lønnsomt ved spot >233 øre eks mva
-MIN_PRICE_DIFF_NOK=1.60     # Anbefalt minimum — dekker batterislitasje
-
-# Strategi
-MIN_PRICE_DIFF_NOK=0.50  # Anbefalt: 0.50-0.80 for å beskytte batterilevetid
+MIN_PRICE_DIFF_NOK=1.60     # Anbefalt minimum — dekker batterislitasje (se seksjon 8.3)
 
 # Home Assistant
 HA_URL=https://homeassistant.abelgaard.no
@@ -474,8 +471,7 @@ HA_TOKEN=<secret>
 
 | Dato | Gjør dette | Prioritet |
 |---|---|---|
-| **~2026-05-21** | Hev `MIN_PRICE_DIFF_NOK` fra 0.10 → 0.50 i `.env` etter testperiode. Se seksjon 8.5. | 🔴 Høy |
-| **Snart** | Fiks kumulativ peak-shaving jaging — bruk `original_charge_kw` som referanse | 🔴 Høy |
+| **~2026-05-21** | Hev `MIN_PRICE_DIFF_NOK` fra 0.10 → **1.60** i `.env` etter testperiode. Se seksjon 8.3. | 🔴 Høy |
 | **Snart** | Verifiser re-planlegging kl 13 ved prisoppdatering faktisk trigges | 🟡 Medium |
 | **Fremtid** | Yr.no værvarsler for adaptiv sol-reserve | 🟢 Lav |
 
