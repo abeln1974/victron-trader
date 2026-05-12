@@ -4,23 +4,22 @@ Basert på Føie AS Nettleiepriser 2026 (Ringerike/Hole/Nore) og Kraftriket Sols
 
 KJØP (per kWh inkl mva) — Norgespris + Kraftriket spotavtale + Føie AS nettleie:
 
-  Norgespris (statlig støtte via Føie AS / Elhub):
-    Pristak: 50 øre/kWh inkl mva = 40 øre eks mva
-    Spot eks mva <= 40 øre → betaler faktisk spot (Norgespris ikke aktiv)
-    Spot eks mva >  40 øre → betaler 40 øre eks mva (Norgespris dekker resten)
-    Formel: energy_ore = min(spot_ore, NORGESPRIS_CAP_ORE)
+  Norgespris (statlig støtte via Føie AS / Elhub, aktiv 01.10.2025–31.12.2026):
+    Fast pristak 50 øre inkl mva = 40 øre eks mva på energileddet.
+    Du betaler ALLTID 40 øre eks mva — uansett om spot er lavere eller høyere.
+    Staten dekker differansen oppover. Du får IKKE billigere strøm om spot er under 40 øre.
+    Formel: energy_ore = NORGESPRIS_CAP_ORE  (konstant, uavhengig av spot)
 
   + Nettleie dag  (06-22): 16.50 øre eks mva → 20.63 inkl mva
   + Nettleie natt (22-06): 10.00 øre eks mva → 12.50 inkl mva
   + Forbruksavgift:         7.13 øre eks mva →  8.91 inkl mva
   + Enova:                  1.00 øre eks mva →  1.25 inkl mva
   × 1.25 (25% mva)
-  = Total reell innkjøpspris
+  = Total reell innkjøpspris (fast, uavhengig av spot)
 
-  Konsekvens:
-    Dag (spot 100 øre eks mva):  (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva
-    Natt (spot 20 øre eks mva):  (20 + 10.00 + 7.13 + 1.00) × 1.25 = 47.7 øre inkl mva
-    Natt (spot 5 øre eks mva):   ( 5 + 10.00 + 7.13 + 1.00) × 1.25 = 28.9 øre inkl mva
+  Resultat:
+    Dag  (06-22): (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva  (alltid)
+    Natt (22-06): (40 + 10.00 + 7.13 + 1.00) × 1.25 = 72.7 øre inkl mva  (alltid)
 
 SALG som plusskunde (ingen mva):
   Salgspris = spotpris eks mva (Nordpool NO1, time-for-time)
