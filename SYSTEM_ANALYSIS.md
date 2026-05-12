@@ -752,6 +752,8 @@ HA_TOKEN=<secret>
 | 2026-05-12 | docs: `LICENSE` AGPL-3.0 lagt til, README.md "Overview (English)" seksjon |
 | 2026-05-12 | docs: seksjon 17 om AGPL-3.0 lisens og GitHub-publisering |
 | 2026-05-12 | docs: fix kommentar i `ha_qubino.py` — EVCS er 1-fase ikke 3-fase |
+| 2026-05-12 | security: `create-gitea-repo.sh` og `push-to-gitea.sh` slettet — inneholdt hardkodet token og personlig info |
+| 2026-05-12 | security: Gitea API-token "victron-trader-issues" revokert etter eksponering i git-historikk |
 
 ---
 
@@ -950,3 +952,4 @@ enn Victrons egen Dynamic ESS. De to viktigste forbedringene som vil gi størst 
 - Interne IP-adresser (192.168.x.x er RFC1918, teknisk OK, men ikke nødvendig å eksponere)
 
 **Ingen sensitiv data funnet i koden** — alt er generisk nok til offentlig publisering.
+
