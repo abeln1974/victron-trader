@@ -748,6 +748,10 @@ HA_TOKEN=<secret>
 | 2026-05-12 | victron_modbus: `set_max_charge_current()` lagt til (DVCC reg 2705) |
 | 2026-05-12 | main: `_enforce_max_soc()` lagt til — kjøres hvert 10s, sikrer Mode 2 (float) når SOC ≥ max_soc |
 | 2026-05-12 | **⚠️ ÅPENT PROBLEM**: AC-koblet Fronius lader batteriet forbi max_soc=90% — se seksjon 6.5 |
+| 2026-05-12 | docs: seksjon 2.1, 5.3, 6.4 lagt til — dokumenterer idle-tilstand, Mode 2/3 bytte, EVCS+peak-shaving |
+| 2026-05-12 | docs: `LICENSE` AGPL-3.0 lagt til, README.md "Overview (English)" seksjon |
+| 2026-05-12 | docs: seksjon 17 om AGPL-3.0 lisens og GitHub-publisering |
+| 2026-05-12 | docs: fix kommentar i `ha_qubino.py` — EVCS er 1-fase ikke 3-fase |
 
 ---
 
