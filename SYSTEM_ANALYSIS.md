@@ -71,6 +71,7 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 - **Hub4Mode = 3** (ESS Control Disabled) — aktiv trading/utlading
 - **Reg37 / unit227** — grid setpoint (W, signed16, negativ = eksport)
 - Keepalive: reg37 må skrives hvert < 10s i Mode 3, ellers nullstilles av MultiPlus
+- **Max SOC-håndhevelse**: se seksjon 6.5 — åpent problem (AC-koblet sol)
 - Startup-reset: Hub4Mode=2 og reg37=0 alltid ved oppstart (krasj-sikring)
 
 ---
@@ -228,6 +229,60 @@ charge_kw = min(action.power_kw, headroom_kw)
 
 `optimizer.py` bruker også et statisk estimat (1.5 kW typisk nattforbruk) for å planlegge
 konservativt fremover, men `_execute_action` bruker alltid live grid for faktisk cap.
+
+### 6.5 ⚠️ ÅPENT PROBLEM: Max SOC-håndhevelse ved AC-koblet sol
+
+**Problemet:**
+Victron ESS har ingen Modbus-register for å sette øvre SOC-grense i Mode 2.
+`MAX_SOC=90` i koden er kun en programvare-terskel for når *trader* stopper å sende
+charge-kommandoer — den hindrer ikke Victron fra å lade batteriet videre via sin egen ESS-logikk.
+
+**Fronius Primo er AC-koblet (på AC output siden av MultiPlus):**
+```
+Grid ─── MultiPlus ─── AC output ─── Fronius Primo (sol)
+                    └── Batteri (DC)
+```
+Fronius leverer AC-effekt til AC output. MultiPlus ser dette som "husforbruk reduseres"
+og lader batteriet med overskuddet. Dette skjer **utenfor DVCC-kontrollen** som kun
+gjelder DC MPPT-ladere.
+
+**Forsøkte løsninger og hvorfor de ikke fungerte:**
+
+| Forsøk | Resultat | Årsak |
+|---|---|---|
+| DVCC reg 2705 = 0A | ❌ Ingen effekt på AC-lading | DVCC gjelder kun DC MPPT |
+| Aktiv discharge-setpoint = sol-W | ❌ Suboptimalt | Kunstig eksport, sol går til grid istedenfor husforbruk |
+| `stop_ess_control()` → Mode 2 | ⚠️ Delvis | Victron går i Absorption-fase og fortsetter å lade |
+
+**Nåværende tilstand (`_enforce_max_soc` i `main.py`):**
+```python
+if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
+    self.victron.stop_ess_control()  # Sikrer Mode 2
+    self._dvcc_charging_stopped = True
+elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
+    self._dvcc_charging_stopped = False
+```
+Dette er ikke tilstrekkelig — Victron i Mode 2 vil fortsatt gå i Absorption og lade
+batteriet forbi 90% ved høy sol-produksjon.
+
+**Mulige løsninger som ikke er implementert:**
+
+1. **Begrens Fronius via Modbus** — Fronius Primo har egen Modbus-TCP på port 502.
+   Register: `inverter/LimActivePwr` kan sette maks AC-effekt. Krever separat Modbus-tilkobling
+   til Fronius IP-adresse.
+
+2. **ESS BatteryLife "Keep charged" trick** — Sett `ESS/SocLimitForFloat` via dbus/MQTT
+   på Cerbo GX direkte (ikke via Modbus). Krever SSH til Cerbo eller Node-RED.
+
+3. **MQTT til Cerbo GX** — `com.victronenergy.settings /Settings/CGwacs/BatteryLife/SocLimit`
+   kan settes til 90% via MQTT. Krever at MQTT er aktivert på Cerbo og Python `paho-mqtt`.
+
+4. **Modbus reg 2900** — Udokumentert register som muligens kan sette max SOC i ESS.
+   Krever testing mot faktisk Cerbo GX v3.72.
+
+**Anbefalt neste steg:**
+Undersøk MQTT-tilnærmingen — Cerbo GX kjører Venus OS med innebygd MQTT broker
+på port 1883. Dette er Victrons anbefalte måte å sette ESS-parametre programmatisk.
 
 ---
 
@@ -614,6 +669,13 @@ HA_TOKEN=<secret>
 | 2026-05-12 | feat: `solar_forecast.py` — dynamisk sol-reserve via Open-Meteo MEPS (met.no 2.5km modell) |
 | 2026-05-12 | optimizer: statisk sol-reserve erstattet med `get_solar_reserve_pct()` fra `solar_forecast.py` |
 | 2026-05-12 | config: `SITE_LAT`, `SITE_LON`, `SOLAR_SYSTEM_EFFICIENCY` lagt til for lokasjon og sol-prognose |
+| 2026-05-12 | batteri: Receel-spec inn (60 000kr, 42.8 kWh netto), Farco/150k-estimat fjernet |
+| 2026-05-12 | config: `MIN_PRICE_DIFF_NOK` default 1.60 → **1.10** basert på Receel 60k/2000sykler/30kWh |
+| 2026-05-12 | victron_modbus: `get_energy_counters()` lagt til (SmartShunt reg 309/310 discharged/charged kWh) |
+| 2026-05-12 | main: kWh-logging bruker SmartShunt energitellere (delta) istedenfor SOC-delta — fallback beholdes |
+| 2026-05-12 | victron_modbus: `set_max_charge_current()` lagt til (DVCC reg 2705) |
+| 2026-05-12 | main: `_enforce_max_soc()` lagt til — kjøres hvert 10s, sikrer Mode 2 (float) når SOC ≥ max_soc |
+| 2026-05-12 | **⚠️ ÅPENT PROBLEM**: AC-koblet Fronius lader batteriet forbi max_soc=90% — se seksjon 6.5 |
 
 ---
 
