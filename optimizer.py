@@ -1,10 +1,10 @@
 """Optimalisering av lade/utlade-strategi."""
-import os
 from dataclasses import dataclass
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import logging
 from price_fetcher import PricePoint, PriceFetcher
+from solar_forecast import get_solar_reserve_pct
 from tariff import (
     buy_price_ore, sell_price_ore, should_charge, should_discharge,
     capacity_charge_for_kw, CAPACITY_CHARGE_NOK,
@@ -97,12 +97,15 @@ class Optimizer:
             remaining_kwh -= min(self.max_discharge, remaining_kwh)
 
         # --- Finn de beste ladetimene (laveste kjopspris, kun natt) ---
-        # Lademål: max_soc minus sol-reserve
-        # 5kW × 4 effektive solhours (realistisk NO mai-aug) = 20 kWh = 44% av 45.6 kWh
-        # Vi lader aldri over (max_soc - solar_reserve) om natten — sol tar resten
-        solar_effective_hours = float(os.getenv("SOLAR_EFFECTIVE_HOURS", "4"))
-        solar_reserve_kwh = CONFIG.solar_max_kw * solar_effective_hours
-        solar_reserve_pct = min(40.0, (solar_reserve_kwh / self.capacity) * 100)  # maks 40% reserve
+        # Lademål: max_soc minus sol-reserve (dynamisk fra Open-Meteo MEPS / fallback statisk)
+        solar_reserve_pct = get_solar_reserve_pct(
+            lat=CONFIG.site_lat,
+            lon=CONFIG.site_lon,
+            panel_peak_kw=CONFIG.solar_max_kw,
+            battery_capacity_kwh=self.capacity,
+            system_efficiency=CONFIG.solar_system_efficiency,
+            fallback_hours=CONFIG.solar_fallback_hours,
+        )
         charge_target_soc = self.max_soc - solar_reserve_pct
         charge_hours = set()
         night_candidates = sorted(

@@ -33,6 +33,12 @@ class Config:
     # Solar (Fronius Primo 5kW AC-coupled)
     solar_max_kw: float = float(os.getenv("SOLAR_MAX_KW", "5.0"))
     solar_threshold_kw: float = float(os.getenv("SOLAR_THRESHOLD_KW", "0.5"))  # Min sol for å unngå nett-lading
+    solar_system_efficiency: float = float(os.getenv("SOLAR_SYSTEM_EFFICIENCY", "0.85"))
+    solar_fallback_hours: float = float(os.getenv("SOLAR_EFFECTIVE_HOURS", "4.0"))  # Brukes hvis API feiler
+
+    # Lokasjon (for Open-Meteo sol-prognose — MET Norway MEPS 2.5km)
+    site_lat: float = float(os.getenv("SITE_LAT", "60.14"))   # Ringerike
+    site_lon: float = float(os.getenv("SITE_LON", "10.25"))   # Ringerike
 
     # Peak-shaving (Føie AS kapasitetstrinn)
     peak_limit_kw: float = float(os.getenv("PEAK_LIMIT_KW", "9.5"))  # Buffer til 10kW-trinnet
