@@ -589,3 +589,121 @@ HA_TOKEN=<secret>
 | 2026-05-12 | tariff: fiks `__main__` (fjernet ugyldig `NORGES_PRICE_ORE`-referanse) |
 | 2026-05-12 | config: `evcs_phases` default 3 → 1 (EVCS er 1-fase) |
 | 2026-05-12 | tariff: Norgespris er pristak — `buy_price` alltid 40 øre eks mva (rettet fra feil min(spot,40)) |
+
+---
+
+## 15. Sammenligning med andre open-source systemer
+
+### 15.1 Oversikt over sammenlignbare prosjekter
+
+| System | Teknologi | Optimering | Sol-prognose | Modbus | Nordpool | Stars |
+|---|---|---|---|---|---|---|
+| **victron-trader (dette)** | Python, Docker | Topp-N greedy | Statisk reserve | ✅ Direkte | ✅ hvakosterstrommen.no | – |
+| **Victron Dynamic ESS** | Node-RED, VRM API | LP (server-side) | VRM/Solcast | ✅ VRM | ✅ Day-ahead EU | ~200 |
+| **EMHASS** | Python, HA add-on | LP (PuLP/linprog) | Open-Meteo/Solcast | ❌ Ingen | ✅ Via HA-sensor | ~1900 |
+| **Battery-Storage-Optimizer** | Python, Pyomo | LP (Pyomo/GLPK) | Ingen | ❌ Ingen | ❌ Generisk | ~50 |
+
+### 15.2 Victron Dynamic ESS (offisiell, Node-RED)
+**GitHub:** `victronenergy/dynamic-ess`
+
+Victrons egen implementasjon som kjører i Node-RED på Cerbo GX / VRM.
+
+**Hva den gjør bedre enn dette systemet:**
+- **Linear Programming (LP)** via VRM-serveren — finner matematisk optimalt schedule, ikke greedy topp-N
+- **Solcast-integrasjon** — bruker faktiske sol-prognoser per time, ikke statisk reserve
+- **SOC-kurve som mål** — planlegger mot en optimal SOC-kurve gjennom hele dagen, ikke bare enkelt-timer
+- **Restrictions per timeslot** — kan sette "ikke eksporter" eller "ikke importer" per time
+- To strategier: "Follow target SOC" og "Minimize grid usage"
+- Bygget og testet av Victron selv — meget stabilt
+
+**Hva dette systemet gjør bedre:**
+- **Norsk pristruktur** — Norgespris-tak, nettleie dag/natt, kapasitetsledd korrekt beregnet
+- **Peak-shaving mot kapasitetstrinn** — bevisst holdes under 9.5 kW for å spare 244 kr/mnd
+- **EVCS-koordinering** — stopper elbillading under discharge, lader fra sol-overskudd
+- **Fastpris-støtte** — Dynamic ESS krever dynamisk kontrakt (spotpris), fungerer ikke med fastpris
+- **Lokalt og uavhengig** — ingen VRM-avhengighet, fungerer uten internett
+
+> **Interessant:** Dynamic ESS bruker `buy price > max_sell_price − battery_cycle_cost` for å
+> stoppe unødvendig trading — samme logikk som `MIN_PRICE_DIFF_NOK` her, men dynamisk beregnet.
+
+### 15.3 EMHASS (Energy Management for Home Assistant)
+**GitHub:** `davidusb-geek/emhass` — ~1900 stars, aktivt vedlikeholdt
+
+Mest populære open-source home energy optimizer. Kjører som HA add-on.
+
+**Hva den gjør bedre:**
+- **Linear Programming** (scipy.linprog eller PuLP) — garantert globalt optimalt schedule
+- **Open-Meteo / Solcast** sol-prognoser — vet faktisk forventet sol per time i morgen
+- **Lastprognoser** — modellerer husforbruk per time basert på historikk
+- **Deferrable loads** — kan planlegge vaskemaskiner, varmtvann etc. til billigste timer
+- **Svært konfigurerbar** — støtter nesten alle prisstrukturer og kontrakter
+
+**Ulemper vs dette systemet:**
+- Krever Home Assistant som mellomlag mot Victron (ingen direkte Modbus)
+- Ingen innebygd peak-shaving mot norske kapasitetstrinn
+- Ingen EVCS-koordinering out-of-the-box
+- Mer kompleks å sette opp (mange konfig-parametre)
+
+### 15.4 Hva dette systemet gjør unikt bra
+
+Etter gjennomgang er det klart at `victron-trader` har noen egenskaper som **ikke finnes i noen
+av de sammenlignbare systemene**:
+
+1. **Norsk kapasitetsledd-optimering** — bevisst peak-shaving mot Føie AS sine trinn (244 kr/mnd)
+2. **Norgespris-tak-beregning** — korrekt håndtering av statlig pristak på 40 øre eks mva
+3. **EVCS 1-fase koordinering** — stopper/starter elbillading synkronisert med batteri-trading
+4. **Sol-selvforbruk + batteri-reserve** — reserverer plass til Fronius-produksjon om natten
+5. **Direkte Modbus-TCP** — ingen HA-avhengighet, lavere latens, fungerer offline
+
+### 15.5 Inspirasjon fra andre systemer — mulige forbedringer
+
+#### 🌟 Idé 1: Linear Programming istedenfor Greedy Topp-N
+**Fra:** EMHASS og Dynamic ESS  
+**Hva:** Bruk `scipy.optimize.linprog` eller `PuLP` for å løse hele 24t-problemet optimalt.  
+**Gevinst:** Garantert bedre schedule enn topp-N — spesielt ved mange timer med lik pris.
+```python
+# Konseptuelt — LP formulering
+# Minimer: sum(buy_cost[t] * charge[t]) - sum(sell_price[t] * discharge[t])
+# Betingelser: SOC[t+1] = SOC[t] + charge[t]*eff - discharge[t]/eff
+#              0 <= SOC[t] <= max_soc
+#              0 <= charge[t] <= max_charge
+#              0 <= discharge[t] <= max_discharge
+```
+**Kompleksitet:** Medium — `scipy` er allerede tilgjengelig, ingen nye avhengigheter.
+
+#### 🌟 Idé 2: Sol-prognoser fra Open-Meteo (gratis API)
+**Fra:** EMHASS  
+**Hva:** Hent tomorrow's sol-prognose fra `api.open-meteo.com` (gratis, ingen API-nøkkel).  
+**Gevinst:** Vet om i morgen er skyet (reserve 0%) eller solrikt (reserve 44%) — ikke statisk 4t.
+```python
+# Open-Meteo, gratis:
+# GET https://api.open-meteo.com/v1/forecast?latitude=60.1&longitude=10.2
+#     &hourly=shortwave_radiation&forecast_days=2
+# shortwave_radiation [W/m²] × panel_area × efficiency → kWh per time
+```
+**Kompleksitet:** Lav — 20 linjer Python, ingen ny avhengighet.  
+**Impact:** Høy — unngår feil sol-reserve på overskyet dag.
+
+#### 🌟 Idé 3: Dynamisk `MIN_PRICE_DIFF_NOK` basert på sesong
+**Fra:** Dynamic ESS sin `battery_cycle_cost`-logikk  
+**Hva:** Beregn automatisk minimum lønnsom spread basert på batterislitasje.  
+**Gevinst:** Sommer: høy terskel (ingen unødvendig trading). Vinter: lav terskel (mer aggressiv).
+```python
+# Auto-beregn basert på måneden:
+# Jun-Aug: min_diff = 1.60 kr (spot sjelden over 233 øre)
+# Sep-Mai: min_diff = 0.50 kr (mer sjanse for topp-priser)
+```
+
+#### 🌟 Idé 4: Lastprognose for EVCS (fra EMHASS-konseptet)
+**Fra:** EMHASS deferrable loads  
+**Hva:** Sjekk om elbil er tilkoblet og plan elbil-lading til billigste nattetimer.  
+**Gevinst:** Elbilen lades alltid på billigste tidspunkt innenfor peak-grensen.
+
+### 15.6 Vurdering
+
+**Konklusjon:** `victron-trader` er et **over gjennomsnittlig godt system** for sin use case.
+Det er mer spesialisert enn de generiske systemene (EMHASS) og mer tilpasset norske forhold
+enn Victrons egen Dynamic ESS. De to viktigste forbedringene som vil gi størst gevinst er:
+
+1. **Open-Meteo sol-prognoser** — lav innsats, høy impact på ladeplanlegging
+2. **LP-optimering** — medium innsats, garantert bedre schedule enn greedy topp-N
