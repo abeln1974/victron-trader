@@ -280,6 +280,18 @@ batteriet forbi 90% ved høy sol-produksjon.
 4. **Modbus reg 2900** — Udokumentert register som muligens kan sette max SOC i ESS.
    Krever testing mot faktisk Cerbo GX v3.72.
 
+**Observert bivirkning (2026-05-12):**
+Når SOC ≥ 90% og Mode 2 er aktiv, vil Victron naturlig eksportere sol-overskudd til grid
+og batteriet vil discharge svakt (ESS balanserer AC-siden). Dette er **ikke trader** som
+discharger — det er normal ESS-oppførsel. Observert:
+```
+Grid: -3159W (eksport)   Batteri: -807W (utlader svakt)   Sol: ~900W   Husforbruk: ~8900W
+```
+Dette trigget en feil i EVCS-logikken: `adjust_for_trading()` sjekket `battery_action`
+(korrekt = `'idle'`) men `surplus_kw`-beregningen ga < 6A → EVCS ble stoppet unødvendig.
+EVCS gjenopptok automatisk etter ~1 minutt da sol økte. **Ikke kritisk, men indikerer at
+`surplus_kw`-beregningen bør robustgjøres ved negativ grid (eksport-situasjon).**
+
 **Anbefalt neste steg:**
 Undersøk MQTT-tilnærmingen — Cerbo GX kjører Venus OS med innebygd MQTT broker
 på port 1883. Dette er Victrons anbefalte måte å sette ESS-parametre programmatisk.
