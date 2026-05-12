@@ -877,3 +877,72 @@ enn Victrons egen Dynamic ESS. De to viktigste forbedringene som vil gi størst 
 
 1. **Open-Meteo sol-prognoser** — lav innsats, høy impact på ladeplanlegging
 2. **LP-optimering** — medium innsats, garantert bedre schedule enn greedy topp-N
+
+---
+
+## 17. Lisens og publisering
+
+### 17.1 Valg: AGPL-3.0 (2026-05-12)
+
+**Hvorfor AGPL-3.0 fremfor MIT/Apache:**
+
+| Lisens | Hva andre kan gjøre | Beskyttelse for deg |
+|---|---|---|
+| **MIT** | Bruke, endre, selge, lukke koden | Ingen — alle kan gjøre hva de vil |
+| **Apache-2.0** | Bruke, endre, patentere | Du kan saksøke, men koden kan lukkes |
+| **GPL-3.0** | Bruke, endre, må dele kildekode | Alle endringer må publiseres |
+| **AGPL-3.0** | Som GPL + nettbruk = kildekode | Nettjenester må også dele koden |
+
+**AGPL-3.0 beskytter spesifikt mot:**
+- Noen tar koden, forbedrer den, selger som SaaS uten å dele endringer
+- Viktron (eller andre) integrerer i Dynamic ESS uten å gi tilbake
+- Patentering av funksjonalitet du har utviklet
+
+**Du beholder alltid:**
+- Opphavsrett (copyright) — du eier koden
+- Rett til å dual-licensere (ta betalt for kommersiell lukket bruk)
+- Rett til å endre lisens senere (hvis alle bidragsytere godtar)
+
+### 17.2 GitHub-publisering (planlagt)
+
+**Strategi: Gitea som master, GitHub som public mirror**
+
+```
+[Du] → push → [Gitea privat] → mirror → [GitHub public]
+```
+
+**Oppsett:**
+1. Opprette `github.com/<bruker>/victron-trader` (public repo)
+2. Gitea Settings → Repository → Mirror Settings → Push Mirror
+3. Interval: `8h` (hver 8. time synkronisering)
+4. GitHub Personal Access Token med `repo` scope
+
+**Fordeler:**
+- Du jobber som før mot Gitea (privat kontroll)
+- GitHub får automatisk kopi (offentlig synlig)
+- Issues/PRs på GitHub kan håndteres etter behov
+- Hvis Gitea går ned, kan du pushe direkte til GitHub
+
+**Engelsk dokumentasjon lagt til (2026-05-12):**
+- README.md: "Overview (English)" seksjon med key features, hardware requirements, comparison vs Dynamic ESS
+- LICENSE: AGPL-3.0 full tekst
+- SYSTEM_ANALYSIS.md: Denne seksjonen (17) forklarer lisens-valget for bidragsytere
+
+**For AI-assistenter/Windsurf:**
+> Husk at all kode nå er AGPL-3.0. Hvis du foreslår endringer som ender i repoet,
+> er de automatisk under samme lisens. Dette er feature, ikke bug — det sikrer at
+> forbedringer blir værende åpne.
+
+### 17.3 Hva som er offentlig vs privat
+
+**Offentlig på GitHub:**
+- All kildekode (Python, Docker, config)
+- Dokumentasjon (SYSTEM_ANALYSIS.md, README.md)
+- Lisens og instruksjoner
+
+**Privat (ikke i repo):**
+- `.env` fil med tokens og interne URL-er
+- `HA_TOKEN` for Home Assistant
+- Interne IP-adresser (192.168.x.x er RFC1918, teknisk OK, men ikke nødvendig å eksponere)
+
+**Ingen sensitiv data funnet i koden** — alt er generisk nok til offentlig publisering.
