@@ -353,6 +353,37 @@ Undersøk MQTT-tilnærmingen for en renere løsning — Cerbo GX kjører Venus O
 innebygd MQTT broker på port 1883. Dette er Victrons anbefalte måte å sette
 ESS-parametre programmatisk (f.eks. `SocLimitForFloat`).
 
+### 6.6 ⚠️ VICTRON ESS-KONFIGURASJON — må settes manuelt i VRM
+
+Victron ESS har en rekke innstillinger som **ikke** kan settes via Modbus fra trader.
+Disse må settes manuelt i VRM-portalen under `Settings → ESS`.
+
+**Korrekte innstillinger (verifisert 2026-05-12):**
+
+| Innstilling | Riktig verdi | Feil verdi (konsekvens) |
+|---|---|---|
+| **Mode** | Optimized **without** BatteryLife | "Optimized with BatteryLife" → BatteryLife setter `Active SOC limit = 80%` og blokkerer discharge |
+| **Minimum SOC** | 20% | Høyere verdi → trader kan ikke utlade dypt nok |
+| **Grid setpoint** | -50W | 0W fungerer, men -50W gir litt mer sol-selvforbruk |
+| **Peak shaving** | **Off** (ikke "Always") | "Always" → Victron sin innebygde peak-shaving kolliderer med traders `_check_peak_shaving()` |
+| **Dynamic ESS** | Off | On → DESS styrer discharge selv, kolliderer med trader |
+
+**Modbus reg2900 verdier (read-only fra trader, settes av Cerbo internt):**
+- `1` = Optimized with BatteryLife (aktiv)
+- `2` = Optimized with BatteryLife (inaktiv/ladet)
+- `9` = Keep batteries charged
+- **`10` = BatteryLife disabled** ← korrekt for "Optimized without BatteryLife"
+- `11` = Dynamic ESS
+
+**Observert problem (2026-05-12):**
+VRM-portalen viste "Optimized with BatteryLife" med `Active SOC limit = 80%`.
+BatteryLife hadde satt en øvre grense på 80% og `BatteryLife state = Discharge disabled`.
+Dette betyr Victron nektet discharge under visse betingelser uavhengig av trader.
+**Løst** ved å bytte til "Optimized without BatteryLife" i VRM.
+
+**NB:** reg2900 kan ikke skrives via Modbus — Cerbo ignorerer skriveforsøk og overstyrer
+med sin egen verdi. Endringen må gjøres i VRM-portalen eller via SSH/MQTT til Cerbo.
+
 ---
 
 ## 7. Kjente scenarioer
@@ -748,6 +779,10 @@ HA_TOKEN=<secret>
 | 2026-05-12 | victron_modbus: `set_max_charge_current()` lagt til (DVCC reg 2705) |
 | 2026-05-12 | main: `_enforce_max_soc()` lagt til — kjøres hvert 10s, sikrer Mode 2 (float) når SOC ≥ max_soc |
 | 2026-05-12 | **⚠️ ÅPENT PROBLEM**: AC-koblet Fronius lader batteriet forbi max_soc=90% — se seksjon 6.5 |
+| 2026-05-12 | ha_qubino: `stop_charging(reason=)` — loggmelding skiller "batteri selger" fra "ikke nok sol" |
+| 2026-05-12 | **Victron ESS-konfig**: BatteryLife var aktiv (reg2900=10 feildiagnostisert) — egentlig BatteryLife disabled ✅ |
+| 2026-05-12 | **Victron ESS-konfig**: Mode var "Optimized with BatteryLife" → byttet til "without" i VRM — se seksjon 6.6 |
+| 2026-05-12 | **Victron Peak shaving**: "Always" i VRM kolliderer med trader — skal være Off |
 | 2026-05-12 | docs: seksjon 2.1, 5.3, 6.4 lagt til — dokumenterer idle-tilstand, Mode 2/3 bytte, EVCS+peak-shaving |
 | 2026-05-12 | docs: `LICENSE` AGPL-3.0 lagt til, README.md "Overview (English)" seksjon |
 | 2026-05-12 | docs: seksjon 17 om AGPL-3.0 lisens og GitHub-publisering |
