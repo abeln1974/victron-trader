@@ -345,16 +345,6 @@ class VictronModbus:
             return True  # ingen aktiv setpoint, ikke nodvendig
         return self.set_grid_setpoint(last)
 
-    def set_max_charge_current(self, amps: int) -> bool:
-        """DVCC max charge current. -1 = ingen grense. (Register 2705)"""
-        val = amps if amps >= 0 else 0xFFFF  # -1 som uint16
-        try:
-            result = self.client.write_register(
-                address=self.REG_MAX_CHARGE_AMP, value=val, device_id=self.UNIT_SYSTEM)
-            return not result.isError()
-        except Exception:
-            return False
-
     def set_max_discharge_power(self, watts: int) -> bool:
         """Max inverter/discharge power. -1 = ingen grense. (Register 2704)"""
         val = watts if watts >= 0 else 0xFFFF
