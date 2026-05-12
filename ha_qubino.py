@@ -184,7 +184,7 @@ class EVCSController:
         self._prefix  = CONFIG.evcs_entity_prefix
         self._min_a   = CONFIG.evcs_min_current_a   # 6A
         self._max_a   = CONFIG.evcs_max_current_a   # 16A
-        self._phases  = CONFIG.evcs_phases           # 3
+        self._phases  = CONFIG.evcs_phases           # 1 (1-fase EVCS, default satt i config.py)
         self._peak_kw = CONFIG.peak_limit_kw         # 9.5 kW
         self._cache: dict = {}
         self._last_fetch = 0.0
