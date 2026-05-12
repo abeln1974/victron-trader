@@ -179,7 +179,8 @@ if __name__ == "__main__":
         (300, 17, "Ettermiddag, veldig dyrt"),
     ]
 
-    print(f"{\'Scenario\':<30} {\'Spot\':\'>6} {\'Cap?\':\'>6} {\'Kjøp\':\'>8} {\'Salg\':\'>8} {\'Margin\':\'>10} {\'Beslutning\':\'>12}")
+    hdr = f"{'Scenario':<30} {'Spot':>6} {'Cap?':>6} {'Kjøp':>8} {'Salg':>8} {'Margin':>10} {'Beslutning':>12}"
+    print(hdr)
     print("-" * 90)
     for spot, hour, label in test_prices:
         buy = buy_price_ore(spot, hour)
