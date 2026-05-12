@@ -2,51 +2,63 @@
 
 Basert på Føie AS Nettleiepriser 2026 (Ringerike/Hole/Nore) og Kraftriket Solstrøm:
 
-KJØP (per kWh inkl mva) — Kraftriket fastpris + Føie AS faktura apr 2026:
-  Kraftriket fastpris   40.00 øre  eks mva  (fast, uavhengig av spot)
-  + Energiledd dag     16.50 øre  eks mva (06:00-22:00)  → 20.63 øre inkl mva
-  + Energiledd natt    10.00 øre  eks mva (22:00-06:00)  → 12.50 øre inkl mva
-  + Forbruksavgift      7.13 øre  eks mva (→ 8.91 inkl mva)
-  + Enova               1.00 øre  eks mva (→ 1.25 inkl mva)
+KJØP (per kWh inkl mva) — Norgespris + Kraftriket spotavtale + Føie AS nettleie:
+
+  Norgespris (statlig støtte via Føie AS / Elhub):
+    Pristak: 50 øre/kWh inkl mva = 40 øre eks mva
+    Spot eks mva <= 40 øre → betaler faktisk spot (Norgespris ikke aktiv)
+    Spot eks mva >  40 øre → betaler 40 øre eks mva (Norgespris dekker resten)
+    Formel: energy_ore = min(spot_ore, NORGESPRIS_CAP_ORE)
+
+  + Nettleie dag  (06-22): 16.50 øre eks mva → 20.63 inkl mva
+  + Nettleie natt (22-06): 10.00 øre eks mva → 12.50 inkl mva
+  + Forbruksavgift:         7.13 øre eks mva →  8.91 inkl mva
+  + Enova:                  1.00 øre eks mva →  1.25 inkl mva
   × 1.25 (25% mva)
   = Total reell innkjøpspris
-  NB: Norgespris-støtten gjelder IKKE — fastpris 40 øre er alltid under 73 øre-grensen
+
+  Konsekvens:
+    Dag (spot 100 øre eks mva):  (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva
+    Natt (spot 20 øre eks mva):  (20 + 10.00 + 7.13 + 1.00) × 1.25 = 47.7 øre inkl mva
+    Natt (spot 5 øre eks mva):   ( 5 + 10.00 + 7.13 + 1.00) × 1.25 = 28.9 øre inkl mva
 
 SALG som plusskunde (ingen mva):
   Salgspris = spotpris eks mva (Nordpool NO1, time-for-time)
-  Ingen påslag eller fratrekk fra Kraftriket ved salg
+  Ingen påslag eller fratrekk — Kraftriket betaler spot direkte.
 
 KAPASITETSLEDD (Føie AS 2026) — kW-basert, inkl MVA:
   Trinn 1:  0– 1.99 kW =  237.5 kr/mnd
   Trinn 2:  2– 4.99 kW =  293.8 kr/mnd
-  Trinn 3:  5– 9.99 kW =  418.8 kr/mnd  ← MÅL: hold her
-  Trinn 4: 10–14.99 kW =  662.5 kr/mnd  ← vil unngå (243.7 kr dyrere)
-  Trinn 5: 15–19.99 kW =  837.5 kr/mnd
-  Trinn 6: 20–24.99 kW = 1075.0 kr/mnd
-  Trinn 7: 25–49.99 kW = 1437.5 kr/mnd
+  Trinn 3:  5– 9.99 kW =  418.8 kr/mnd  <- MÅL: hold her
+  Trinn 4: 10-14.99 kW =  662.5 kr/mnd  <- vil unngå (243.7 kr dyrere)
+  Trinn 5: 15-19.99 kW =  837.5 kr/mnd
+  Trinn 6: 20-24.99 kW = 1075.0 kr/mnd
+  Trinn 7: 25-49.99 kW = 1437.5 kr/mnd
 
   Beregning: Snitt av de 3 høyeste timer på ULIKE dager per mnd.
   Faktisk trinn apr 2026: 10-15 kW (avregnet 12.09 kW) = 662.5 kr/mnd
   Peak-shaving-grense: 9.5 kW (0.5 kW buffer til 10 kW-trinnet)
-  Besparelse Trinn 3→4: 662.5 - 418.8 = 243.7 kr/mnd
+  Besparelse Trinn 3->4: 662.5 - 418.8 = 243.7 kr/mnd
 """
 import os
 from datetime import datetime
 from typing import List, Tuple
 from config import CONFIG
 
-# Konstanter — Føie AS 2026 + Kraftriket Solstrøm (alle eks mva)
-FIXED_PRICE_ORE      = float(os.getenv("FIXED_PRICE_ORE",       "40.00"))  # Kraftriket fastpris eks mva (uavhengig av spot)
-GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva (Føie AS: 20.63 øre inkl mva)
-GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 øre inkl mva)
+# Konstanter — Føie AS 2026 + Kraftriket Solstrøm + Norgespris (alle eks mva)
+NORGESPRIS_CAP_ORE   = float(os.getenv("NORGESPRIS_CAP_ORE",   "40.00"))  # 50 øre inkl mva = 40 øre eks mva
+GRID_TARIFF_DAY_ORE  = float(os.getenv("GRID_TARIFF_DAY_ORE",  "16.50"))  # eks mva (Føie AS: 20.63 inkl mva)
+GRID_TARIFF_NIGHT_ORE= float(os.getenv("GRID_TARIFF_NIGHT_ORE","10.00"))  # eks mva (Føie AS: 12.50 inkl mva)
 CONSUMPTION_TAX_ORE  = float(os.getenv("CONSUMPTION_TAX_ORE",   "7.13"))  # eks mva (8.91 inkl mva)
 ENOVA_ORE            = float(os.getenv("ENOVA_ORE",              "1.00"))  # eks mva (1.25 inkl mva)
-CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))  # Trinn 4 (10-15kW) inkl MVA — faktisk trinn apr 2026
+CAPACITY_CHARGE_NOK  = float(os.getenv("CAPACITY_CHARGE_NOK",  "662.50"))  # Trinn 4 inkl MVA — faktisk trinn apr 2026
 DAY_TARIFF_START     = int(os.getenv("DAY_TARIFF_START",            "6"))
 DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 
+# Bakoverkompatibilitet — FIXED_PRICE_ORE ikke lenger brukt, men beholdes for evt. .env-referanser
+FIXED_PRICE_ORE = NORGESPRIS_CAP_ORE
+
 # Kapasitetstrinn (Føie AS 2026, kW-basert, inkl MVA)
-# Format: (kW_grense, kr_per_mnd)
 CAPACITY_TIERS = [
     (2,    237.5),
     (5,    293.8),
@@ -71,26 +83,29 @@ def buy_price_ore(spot_ore: float, hour: int) -> float:
     """
     Beregn total reell innkjøpspris i øre/kWh inkl mva.
 
-    Kraftriket fastpris (40 øre eks mva) + nettleie + avgifter × mva.
-    spot_ore brukes ikke — fastprisavtale uavhengig av spot.
-    Norgespris gjelder ikke (fastpris 40 øre < 73 øre-grensen).
-    hour: Time på dagen (0-23) for riktig nettariff (dag/natt).
+    Norgespris-logikk: betaler min(spot, 40 øre eks mva) for energileddet.
+    Spot under 40 øre eks mva → betaler faktisk spot (billig natt).
+    Spot over  40 øre eks mva → betaler 40 øre (Norgespris aktiveres).
+
+    Eksempler:
+      Natt, spot 15 øre: (15 + 10.00 + 7.13 + 1.00) × 1.25 = 41.4 øre inkl mva
+      Dag,  spot 100 øre: (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva
     """
+    energy = min(spot_ore, NORGESPRIS_CAP_ORE)
     grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
-    return (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
+    return (energy + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
 
 
 def sell_price_ore(spot_ore: float = 0.0) -> float:
     """
     Salgspris i øre/kWh = spotpris eks mva (Nordpool NO1, time-for-time).
     Ingen påslag eller fratrekk — Kraftriket betaler spot direkte.
-    spot_ore: Spotpris i øre eks mva.
     """
     return spot_ore
 
 
 def capacity_charge_for_kw(peak_kw: float) -> float:
-    """Returner kapasitetsledd for gitt toppeffekt (kW) — Føie AS 2026 kW-basert."""
+    """Returner kapasitetsledd for gitt toppeffekt (kW) — Føie AS 2026."""
     for limit_kw, charge_nok in CAPACITY_TIERS:
         if peak_kw < limit_kw:
             return charge_nok
@@ -106,9 +121,8 @@ def peak_reduction_savings(current_peak_kw: float, reduced_peak_kw: float) -> fl
 
 def profit_per_kwh_ore(spot_ore: float, hour: int) -> float:
     """
-    Beregn netto fortjeneste per kWh:
-    Selger til spot, kjøpte til fastpris + avgifter.
-    Negativ = tap.
+    Beregn netto fortjeneste per kWh ved å selge nå.
+    Negativ = tap (solgte billigere enn kjøpte).
     """
     buy = buy_price_ore(spot_ore, hour)
     sell = sell_price_ore(spot_ore)
@@ -118,7 +132,7 @@ def profit_per_kwh_ore(spot_ore: float, hour: int) -> float:
 def should_charge(spot_ore: float, hour: int, min_profit_ore: float = 20.0) -> bool:
     """
     Skal vi lade batteriet nå?
-    Gir mening å lade når kjøpspris er lav nok til at fremtidig salg gir profitt.
+    Lad når kjøpspris er lav nok til at fremtidig salg gir profitt.
     """
     effective_sell = sell_price_ore(spot_ore) * CONFIG.battery_efficiency
     return buy_price_ore(spot_ore, hour) < (effective_sell - min_profit_ore)
@@ -127,13 +141,11 @@ def should_charge(spot_ore: float, hour: int, min_profit_ore: float = 20.0) -> b
 def should_discharge(spot_ore: float, hour: int) -> bool:
     """
     Skal vi utlade batteriet nå?
-
-    Sammenlign salgspris (spot eks mva) mot reell kjøpspris (fastpris + avgifter inkl mva).
-    Lønnsomt å selge når salgspris > kjøpspris + terskel.
+    Lønnsomt når salgspris (spot) > kjøpspris (Norgespris-cap + avgifter) + terskel.
     """
     buy = buy_price_ore(spot_ore, hour)
     sell = sell_price_ore(spot_ore)
-    spread = sell - buy  # Positivt når salg > kjøp
+    spread = sell - buy
     min_spread_ore = CONFIG.min_price_diff_nok * 100
     return spread > min_spread_ore
 
@@ -144,42 +156,43 @@ def format_prices(spot_ore: float, hour: int) -> str:
     sell = sell_price_ore(spot_ore)
     profit = sell - buy
     tariff = "dag" if is_day_tariff(hour) else "natt"
-
+    norgespris_aktiv = spot_ore > NORGESPRIS_CAP_ORE
     return (
         f"Spot: {spot_ore:.1f} øre | "
+        f"Norgespris: {'aktiv' if norgespris_aktiv else 'ikke aktiv (spot < cap)'} | "
         f"Kjøp ({tariff}): {buy:.1f} øre inkl mva | "
-        f"Salg (spot): {sell:.1f} øre | "
+        f"Salg: {sell:.1f} øre | "
         f"Margin: {profit:+.1f} øre"
     )
 
 
-
 if __name__ == "__main__":
-    print("=== Prisanalyse Abelgard (Kraftriket + Føie AS) ===\n")
+    print("=== Prisanalyse Abelgard (Norgespris + Kraftriket + Føie AS) ===\n")
 
     test_prices = [
-        (10,  3, "Natt, veldig billig"),
+        (5,   3, "Natt, ekstremt billig"),
+        (15,  3, "Natt, veldig billig"),
         (30,  3, "Natt, billig"),
-        (60,  3, "Natt, middels"),
+        (40,  3, "Natt, Norgespris-grense"),
+        (60,  3, "Natt, over cap"),
         (100, 10, "Dag, middels"),
         (146, 10, "Dag, april-snitt"),
         (200, 17, "Ettermiddag, dyrt"),
         (300, 17, "Ettermiddag, veldig dyrt"),
     ]
 
-    print(f"{\'Scenario\':<30} {\'Kjøp (reell)\':\'>14} {\'Salg\':\'>8} {\'Margin\':\'>10} {\'Beslutning\':\'>12}")
-    print("-" * 80)
+    print(f"{\'Scenario\':<30} {\'Spot\':\'>6} {\'Cap?\':\'>6} {\'Kjøp\':\'>8} {\'Salg\':\'>8} {\'Margin\':\'>10} {\'Beslutning\':\'>12}")
+    print("-" * 90)
     for spot, hour, label in test_prices:
         buy = buy_price_ore(spot, hour)
         sell = sell_price_ore(spot)
         margin = sell - buy
+        cap = "ja" if spot > NORGESPRIS_CAP_ORE else "nei"
         beslutning = "✅ Utlade" if should_discharge(spot, hour) else "🔋 Lade" if should_charge(spot, hour) else "⏸️ Vent"
-        print(f"{label:<30} {buy:>12.1f}ø  {sell:>6.1f}ø  {margin:>+9.1f}ø  {beslutning:>12}")
+        print(f"{label:<30} {spot:>5.0f}ø  {cap:>5}  {buy:>7.1f}ø  {sell:>6.1f}ø  {margin:>+9.1f}ø  {beslutning:>12}")
 
     print(f"\n--- Kapasitetsledd ---")
     print(f"Nåværende toppeffekt 12.09 kW → {capacity_charge_for_kw(12.09):.2f} kr/mnd")
-    savings = peak_reduction_savings(12.09, 9.5)
-    print(f"Spare ved å holde under 10 kW: {savings:.2f} kr/mnd")
-    print(f"\nSalgspris = ren spotpris eks mva (ingen påslag, ingen mva)")
-    print(f"Kjøpspris dag:  {buy_price_ore(100, 10):.1f} øre inkl mva (fastpris 40 + nettleie + avgifter)")
-    print(f"Kjøpspris natt: {buy_price_ore(100, 3):.1f} øre inkl mva")
+    print(f"Spare ved å holde under 10 kW: {peak_reduction_savings(12.09, 9.5):.2f} kr/mnd")
+    print(f"\nNorgespris cap: {NORGESPRIS_CAP_ORE:.0f} øre eks mva = {NORGESPRIS_CAP_ORE * VAT:.0f} øre inkl mva")
+    print(f"Salgspris = ren spotpris eks mva (ingen påslag, ingen mva)")
