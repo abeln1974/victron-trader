@@ -671,18 +671,29 @@ av de sammenlignbare systemene**:
 ```
 **Kompleksitet:** Medium — `scipy` er allerede tilgjengelig, ingen nye avhengigheter.
 
-#### 🌟 Idé 2: Sol-prognoser fra Open-Meteo (gratis API)
+#### 🌟 Idé 2: Sol-prognoser via Open-Meteo med MET Norway-modell
 **Fra:** EMHASS  
-**Hva:** Hent tomorrow's sol-prognose fra `api.open-meteo.com` (gratis, ingen API-nøkkel).  
+**Bakgrunn — er Open-Meteo bra for Norge?**
+
+> Met.no sin egen `Locationforecast 2.0` API gir **ikke** solstråling — kun `ultraviolet_index_clear_sky`.
+> Open-Meteo bruker derimot **MET Nordic MEPS** (met.no sitt 2.5 km ensemble-modell) som kilde,
+> og eksponerer `shortwave_radiation` (W/m²) direkte fra dette datasettet.
+> Det er altså **met.no sin egen modell under panseret** — bare tilgjengeliggjort via Open-Meteo.
+> Nøyaktighet: MetCoOp 2.5 km, ECMWF-initialisert, oppdatert hourly — best tilgjengelig for Skandinavia.
+
+**Hva:** Hent sol-prognose fra `api.open-meteo.com` med `models=metno_seamless` (gratis, ingen API-nøkkel).  
 **Gevinst:** Vet om i morgen er skyet (reserve 0%) eller solrikt (reserve 44%) — ikke statisk 4t.
 ```python
-# Open-Meteo, gratis:
-# GET https://api.open-meteo.com/v1/forecast?latitude=60.1&longitude=10.2
-#     &hourly=shortwave_radiation&forecast_days=2
-# shortwave_radiation [W/m²] × panel_area × efficiency → kWh per time
+# Open-Meteo med MET Norway-modell, gratis, ingen API-nøkkel:
+# GET https://api.open-meteo.com/v1/forecast
+#     ?latitude=60.1&longitude=10.2&models=metno_seamless
+#     &hourly=shortwave_radiation&forecast_days=2&timezone=Europe/Oslo
+# shortwave_radiation [W/m²] integrert over timer → Wh/m²
+# solar_kwh = sum(W/m² × 1h) / 1000 × panel_m2 × efficiency
 ```
-**Kompleksitet:** Lav — 20 linjer Python, ingen ny avhengighet.  
-**Impact:** Høy — unngår feil sol-reserve på overskyet dag.
+**Kompleksitet:** Lav — ~25 linjer Python, ingen ny avhengighet (kun `urllib`/`requests`).  
+**Impact:** Høy — unngår feil sol-reserve på overskyet dag.  
+**Begrensning:** Kun 2.5 dager med MEPS, deretter ECMWF 9 km — men 24t fremover er alltid MEPS.
 
 #### 🌟 Idé 3: Dynamisk `MIN_PRICE_DIFF_NOK` basert på sesong
 **Fra:** Dynamic ESS sin `battery_cycle_cost`-logikk  
