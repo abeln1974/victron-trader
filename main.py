@@ -179,22 +179,35 @@ class EnergyTrader:
             time.sleep(3)
 
     def _enforce_max_soc(self):
-        """Håndhev max SOC via DVCC ladestrøm — stopper lading ved >= max_soc.
+        """Håndhev max SOC for AC-koblet Fronius Primo.
 
-        Victron ESS Mode 2 har ingen innebygd max SOC-grense via Modbus.
-        DVCC reg 2705 = 0A stopper all lading (inkl sol), -1 = ubegrenset.
+        DVCC max charge current (reg 2705) påvirker kun DC MPPT-ladere, ikke AC-koblet sol.
+        Løsning: når SOC >= max_soc, sett discharge-setpoint = sol-produksjon slik at
+        MultiPlus eksporterer det Fronius lader inn — batteriet holder seg flatt.
         Kjøres hvert 10s fra peak-shave-sløyfen.
         """
         soc = self.victron.get_soc()
         if soc is None:
             return
-        if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — DVCC stopper lading (NMC-vern)")
-            self.victron.set_max_charge_current(0)
-            self._dvcc_charging_stopped = True
+
+        if soc >= CONFIG.max_soc:
+            solar_w = self.victron.get_solar_power() or 0
+            bat_w = self.victron.get_battery_power() or 0
+            if bat_w > 50:  # Batteriet lader fortsatt
+                # Eksporter tilsvarende sol-produksjon til grid — nøytraliserer AC-lading
+                export_w = max(int(solar_w), int(bat_w))
+                if not self._dvcc_charging_stopped:
+                    logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — motvirker AC-sol {solar_w:.0f}W med eksport (NMC-vern)")
+                    self._dvcc_charging_stopped = True
+                self.victron.set_discharge_power(export_w / 1000)
+            elif self._dvcc_charging_stopped and bat_w <= 50:
+                # Lading stoppet naturlig
+                self.victron.stop_ess_control()
+                self._dvcc_charging_stopped = False
+                logger.info(f"SOC {soc:.1f}% — lading stoppet, ESS tilbake til Mode 2")
         elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — DVCC gjenoppretter lading")
-            self.victron.set_max_charge_current(-1)
+            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — stopper SOC-vern, ESS til Mode 2")
+            self.victron.stop_ess_control()
             self._dvcc_charging_stopped = False
 
     def _execute_trade_cycle(self):
