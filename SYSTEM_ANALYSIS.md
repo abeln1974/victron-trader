@@ -280,21 +280,30 @@ batteriet forbi 90% ved høy sol-produksjon.
 4. **Modbus reg 2900** — Udokumentert register som muligens kan sette max SOC i ESS.
    Krever testing mot faktisk Cerbo GX v3.72.
 
-**Observert bivirkning (2026-05-12):**
-Når SOC ≥ 90% og Mode 2 er aktiv, vil Victron naturlig eksportere sol-overskudd til grid
-og batteriet vil discharge svakt (ESS balanserer AC-siden). Dette er **ikke trader** som
-discharger — det er normal ESS-oppførsel. Observert:
+**Observert oppførsel (2026-05-12):**
+SOC nådde 90.4% og Victron gikk i **Absorption** (konstant spenning ~57V, synkende strøm).
+Trader satte Mode 2 via `stop_ess_control()` — men Victron fortsatte å lade i Absorption
+som er en del av sin interne ladekurve, uavhengig av Hub4Mode.
+
+Etter ca. 10 minutter gikk Victron selv til **Float** og ladingen stoppet naturlig.
+SOC sank deretter fra 90.4% til 86.7% via husforbruk alene — ingen aktiv utlading fra trader.
+
 ```
-Grid: -3159W (eksport)   Batteri: -807W (utlader svakt)   Sol: ~900W   Husforbruk: ~8900W
+15:17  SOC 89.8% — trader idle, sol lader
+15:24  SOC 90.4% — Absorption, trader setter Mode 2
+15:40  SOC 86.7% — naturlig forbruk, batteri +495W (svak sol-lading), grid +1122W
 ```
-Dette trigget en feil i EVCS-logikken: `adjust_for_trading()` sjekket `battery_action`
-(korrekt = `'idle'`) men `surplus_kw`-beregningen ga < 6A → EVCS ble stoppet unødvendig.
-EVCS gjenopptok automatisk etter ~1 minutt da sol økte. **Ikke kritisk, men indikerer at
-`surplus_kw`-beregningen bør robustgjøres ved negativ grid (eksport-situasjon).**
+
+**Konklusjon:** Victron håndterer ladekurven (Bulk → Absorption → Float) selv.
+`_enforce_max_soc()` hindrer trader fra å aktivt lade forbi 90%, men kan ikke stoppe
+Victrons interne Absorption-fase. Dette er **akseptabelt** — Absorption ved 90% er
+ikke skadelig for NMC (det er konstant spenning, ikke overlading). Batteriet vil aldri
+overstige BMS-grensen (57.4V).
 
 **Anbefalt neste steg:**
-Undersøk MQTT-tilnærmingen — Cerbo GX kjører Venus OS med innebygd MQTT broker
-på port 1883. Dette er Victrons anbefalte måte å sette ESS-parametre programmatisk.
+Undersøk MQTT-tilnærmingen for en renere løsning — Cerbo GX kjører Venus OS med
+innebygd MQTT broker på port 1883. Dette er Victrons anbefalte måte å sette
+ESS-parametre programmatisk (f.eks. `SocLimitForFloat`).
 
 ---
 
