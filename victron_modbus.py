@@ -55,7 +55,7 @@ class VictronModbus:
     REG_GRID_SETPOINT_HI  = 2717
     REG_HUB4_MODE         = 2902   # /Settings/Cgwacs/Hub4Mode: 2=Opt, 3=ESS Control Disabled
     REG_ESS_MIN_SOC       = 2901   # ESS Minimum SoC (scale x10, 200 = 20%)
-    REG_MAX_CHARGE_AMP    = 2705   # DVCC max charge current (A, -1=ingen grense)
+    REG_MAX_CHARGE_AMP    = 2705   # DVCC max charge current (A, -1=ingen grense, 0=stopp lading)
     REG_MAX_DISCHARGE_W   = 2704   # Max inverter/discharge power (W, -1=ingen grense)
 
     # Mode 3 — direkte VE.Bus styring (bypasser grid-meter loop)
@@ -291,6 +291,26 @@ class VictronModbus:
                 return True
         except Exception:
             logger.exception("set_min_soc feilet")
+        return False
+
+    def set_max_charge_current(self, amps: int) -> bool:
+        """Sett DVCC max ladestrøm (reg 2705). 0=stopp lading, -1=ingen grense.
+
+        Brukes for å håndheve max SOC for NMC-levetid: sett 0A når SOC >= max_soc,
+        gjenopprett -1 når SOC < max_soc. Virker i både Mode 2 og Mode 3.
+        """
+        if self.readonly:
+            return False
+        try:
+            val = amps & 0xFFFF  # -1 → 65535 (unsigned16)
+            r = self.client.write_register(
+                address=self.REG_MAX_CHARGE_AMP, value=val, device_id=self.UNIT_SYSTEM)
+            if not r.isError():
+                label = "STOPP" if amps == 0 else ("ubegrenset" if amps == -1 else f"{amps}A")
+                logger.info(f"DVCC max ladestrøm: {label}")
+                return True
+        except Exception:
+            logger.exception("set_max_charge_current feilet")
         return False
 
     def stop_ess_control(self) -> bool:

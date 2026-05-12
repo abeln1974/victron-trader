@@ -77,6 +77,7 @@ class EnergyTrader:
         last_keepalive = 0.0
         last_peak_shave = 0.0
         last_price_count = 0
+        self._dvcc_charging_stopped = False  # Sporer om vi har satt DVCC 0A
 
         while self.running:
             now = datetime.now(OSLO_TZ)
@@ -100,6 +101,7 @@ class EnergyTrader:
                 except Exception:
                     pass
                 self._check_peak_shaving()
+                self._enforce_max_soc()
                 try:
                     grid_w  = self._get_grid_power() or 0
                     solar_w = self.victron.get_solar_power() or 0
@@ -175,6 +177,25 @@ class EnergyTrader:
                 self._log_status()
 
             time.sleep(3)
+
+    def _enforce_max_soc(self):
+        """Håndhev max SOC via DVCC ladestrøm — stopper lading ved >= max_soc.
+
+        Victron ESS Mode 2 har ingen innebygd max SOC-grense via Modbus.
+        DVCC reg 2705 = 0A stopper all lading (inkl sol), -1 = ubegrenset.
+        Kjøres hvert 10s fra peak-shave-sløyfen.
+        """
+        soc = self.victron.get_soc()
+        if soc is None:
+            return
+        if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
+            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — DVCC stopper lading (NMC-vern)")
+            self.victron.set_max_charge_current(0)
+            self._dvcc_charging_stopped = True
+        elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
+            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — DVCC gjenoppretter lading")
+            self.victron.set_max_charge_current(-1)
+            self._dvcc_charging_stopped = False
 
     def _execute_trade_cycle(self):
         try:
