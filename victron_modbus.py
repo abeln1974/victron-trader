@@ -23,7 +23,7 @@ OPPSETT ABELGÅRD:
 - SmartShunt 500A: device_id=226, SOC på reg 266
 - VE.Bus: device_id=227, ESS reg 37
 - System (Cerbo): device_id=100, grid reg 820, PV reg 850, ESS setpoint reg 2716
-- ESS: Optimized without BatteryLife, min SOC 50%
+- ESS: Optimized without BatteryLife, min SOC 20%
 - Modbus-TCP aktiveres: Settings → Services → Modbus-TCP → Enabled
 
 SIKKERHET:
