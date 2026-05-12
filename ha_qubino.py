@@ -248,11 +248,11 @@ class EVCSController:
     # Styring                                                              #
     # ------------------------------------------------------------------ #
 
-    def stop_charging(self) -> bool:
-        """Stopp lading helt — brukes når vi selger fra batteri."""
+    def stop_charging(self, reason: str = "batteri selger") -> bool:
+        """Stopp lading helt."""
         if not self.is_connected():
             return True
-        logger.info("EVCS: stopper elbillading (batteri selger)")
+        logger.info(f"EVCS: stopper elbillading ({reason})")
         ok = self._call("switch", "turn_off",
                         {"entity_id": f"switch.{self._prefix}_ev_charging"})
         self._last_current_a = 0
@@ -333,7 +333,7 @@ class EVCSController:
             if amps >= self._min_a:
                 self.set_charge_current(amps)
             else:
-                self.stop_charging()  # Ikke nok sol
+                self.stop_charging(reason="ikke nok sol")
             return
 
         # --- Scenario 3: Natt eller idle → gi EVCS tilgjengelig kapasitet ---
