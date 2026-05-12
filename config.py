@@ -42,7 +42,7 @@ class Config:
     evcs_entity_prefix: str = os.getenv("EVCS_ENTITY_PREFIX", "evcs_hq2309vtvnf")
     evcs_min_current_a: int = int(os.getenv("EVCS_MIN_CURRENT_A", "6"))   # Min ladestrøm (A)
     evcs_max_current_a: int = int(os.getenv("EVCS_MAX_CURRENT_A", "16"))  # Max vi tillater (A)
-    evcs_phases: int = int(os.getenv("EVCS_PHASES", "3"))                 # Antall faser
+    evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (EVCS HQ2309VTVNF er 1-fase)
 
     # Strategy
     min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "0.10"))
