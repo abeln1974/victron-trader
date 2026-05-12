@@ -153,8 +153,9 @@ def format_prices(spot_ore: float, hour: int) -> str:
     )
 
 
+
 if __name__ == "__main__":
-    print("=== Prisanalyse Abelgard (Kraftriket + Elvia) ===\n")
+    print("=== Prisanalyse Abelgard (Kraftriket + Føie AS) ===\n")
 
     test_prices = [
         (10,  3, "Natt, veldig billig"),
@@ -166,19 +167,19 @@ if __name__ == "__main__":
         (300, 17, "Ettermiddag, veldig dyrt"),
     ]
 
-    print(f"{'Scenario':<30} {'Kjøp (reell)':>14} {'Salg':>8} {'Margin':>10} {'Beslutning':>12}")
+    print(f"{\'Scenario\':<30} {\'Kjøp (reell)\':\'>14} {\'Salg\':\'>8} {\'Margin\':\'>10} {\'Beslutning\':\'>12}")
     print("-" * 80)
     for spot, hour, label in test_prices:
         buy = buy_price_ore(spot, hour)
-        sell = sell_price_ore()
+        sell = sell_price_ore(spot)
         margin = sell - buy
         beslutning = "✅ Utlade" if should_discharge(spot, hour) else "🔋 Lade" if should_charge(spot, hour) else "⏸️ Vent"
         print(f"{label:<30} {buy:>12.1f}ø  {sell:>6.1f}ø  {margin:>+9.1f}ø  {beslutning:>12}")
 
     print(f"\n--- Kapasitetsledd ---")
-    print(f"Din nåværende toppeffekt: 12.69 kW → trinn 10-15A = {CAPACITY_CHARGE_NOK:.2f} kr/mnd")
-    print(f"Neste trinn (15-20A):  {capacity_charge_for_kw(11):.2f} kr/mnd")
-    savings = peak_reduction_savings(12.69, 9.5)
-    print(f"Spare ved å holde under 10.35 kW: {savings:.2f} kr/mnd")
-    print(f"\nNorgespris-støtte: {NORGES_PRICE_ORE} øre/kWh trekkes fra din regning (ingen mva)")
-    print(f"Netto salgspris: {sell_price_ore():.2f} øre/kWh (75 - 6.25 nettselskap)")
+    print(f"Nåværende toppeffekt 12.09 kW → {capacity_charge_for_kw(12.09):.2f} kr/mnd")
+    savings = peak_reduction_savings(12.09, 9.5)
+    print(f"Spare ved å holde under 10 kW: {savings:.2f} kr/mnd")
+    print(f"\nSalgspris = ren spotpris eks mva (ingen påslag, ingen mva)")
+    print(f"Kjøpspris dag:  {buy_price_ore(100, 10):.1f} øre inkl mva (fastpris 40 + nettleie + avgifter)")
+    print(f"Kjøpspris natt: {buy_price_ore(100, 3):.1f} øre inkl mva")
