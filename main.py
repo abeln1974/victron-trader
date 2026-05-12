@@ -59,6 +59,7 @@ class EnergyTrader:
         logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%")
 
         self._action_start_soc: Optional[float] = None
+        self._action_start_counters: Optional[tuple] = None  # (discharged_kwh, charged_kwh) ved action-start
         self._last_price_nok: float = 0.0
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -139,21 +140,34 @@ class EnergyTrader:
 
             elif self.current_action and self.current_action.action != 'idle' and action_hour != now.hour:
                 end_soc = self.victron.get_soc() or 0
-                if self._action_start_soc is not None:
+                act = self.current_action.action
+                actual_kwh = 0.0
+                kwh_source = "soc-delta"
+                # Foretrekk SmartShunt energitellere (reg 309/310) over SOC-delta
+                end_counters = self.victron.get_energy_counters()
+                if end_counters and self._action_start_counters:
+                    start_dis, start_chg = self._action_start_counters
+                    end_dis, end_chg = end_counters
+                    if act == 'discharge':
+                        actual_kwh = max(0.0, end_dis - start_dis)
+                    else:
+                        actual_kwh = max(0.0, end_chg - start_chg)
+                    kwh_source = "smartshunt"
+                elif self._action_start_soc is not None:
                     delta_soc = abs(end_soc - self._action_start_soc)
                     actual_kwh = CONFIG.battery_capacity_kwh * delta_soc / 100
-                    if actual_kwh > 0.05:
-                        act = self.current_action.action
-                        db_action = "sell" if act == "discharge" else "buy"
-                        spot_eks_mva = self._last_price_nok / CONFIG.vat
-                        price_nok = (sell_price_ore(spot_eks_mva * 100) if db_action == "sell"
-                                     else buy_price_ore(spot_eks_mva * 100, datetime.now(OSLO_TZ).hour)) / 100
-                        self.tracker.log_trade(db_action, actual_kwh, price_nok)
-                        logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
+                if actual_kwh > 0.05:
+                    db_action = "sell" if act == "discharge" else "buy"
+                    spot_eks_mva = self._last_price_nok / CONFIG.vat
+                    price_nok = (sell_price_ore(spot_eks_mva * 100) if db_action == "sell"
+                                 else buy_price_ore(spot_eks_mva * 100, datetime.now(OSLO_TZ).hour)) / 100
+                    self.tracker.log_trade(db_action, actual_kwh, price_nok)
+                    logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh [{kwh_source}] (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
                 logger.info(f"Action fra time {action_hour:02d} utgatt (nå {now.hour:02d}) — stopper ESS")
                 self.victron.stop_ess_control()
                 self.current_action = None
                 self._action_start_soc = None
+                self._action_start_counters = None
                 self._original_charge_kw = 0.0
 
             if now.minute % 5 == 0 and now.minute != last_status_min:
@@ -191,7 +205,11 @@ class EnergyTrader:
             action = self.optimizer.get_immediate_action(current, prices, soc, solar_kw)
             logger.info(f"Action: {action.action} @ {action.power_kw:.1f}kW | {action.reason}")
 
+            prev_action = self.current_action
             self._execute_action(action, soc, current.price_nok_kwh)
+            # Les energitellere ved start av ny aktiv action (ikke ved idle)
+            if action.action != 'idle' and (prev_action is None or prev_action.action == 'idle'):
+                self._action_start_counters = self.victron.get_energy_counters()
             self.current_action = action
 
             stats = self.tracker.get_stats()

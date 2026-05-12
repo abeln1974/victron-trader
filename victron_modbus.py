@@ -74,6 +74,10 @@ class VictronModbus:
     REG_PV_POWER          = 808    # AC-coupled PV on AC output L1 (W) - Fronius Primo 5kW
     REG_BATTERY_POWER     = 842    # Battery Power System (W, signed16, positiv=lading)
 
+    # SmartShunt (unit 226) akkumulerte energitellere
+    REG_DISCHARGED_ENERGY = 309    # History/DischargedEnergy (scale /10 → kWh, akkumulert)
+    REG_CHARGED_ENERGY    = 310    # History/ChargedEnergy (scale /10 → kWh, akkumulert)
+
     # Unit-ID — verifisert via Modbus device scan mot 192.168.1.60
     UNIT_SYSTEM           = 100    # com.victronenergy.system: grid(820), pv(850), ESS(2716/2902)
     UNIT_BATTERY          = 226    # com.victronenergy.battery: SmartShunt 500A — SOC(266)
@@ -362,6 +366,24 @@ class VictronModbus:
                 return result.registers[0] / 10.0
         except Exception as e:
             logger.debug(f"get_soc feilet: {e}")
+        return None
+
+    def get_energy_counters(self) -> Optional[tuple]:
+        """Les SmartShunt akkumulerte energitellere (reg 309/310, scale /10).
+
+        Returnerer (discharged_kwh, charged_kwh) eller None ved feil.
+        Delta mellom to avlesninger gir faktisk kWh inn/ut — mer nøyaktig enn SOC-delta.
+        """
+        try:
+            r_dis = self.client.read_holding_registers(
+                address=self.REG_DISCHARGED_ENERGY, count=1, device_id=self.UNIT_BATTERY)
+            r_chg = self.client.read_holding_registers(
+                address=self.REG_CHARGED_ENERGY, count=1, device_id=self.UNIT_BATTERY)
+            if (r_dis and not r_dis.isError() and
+                    r_chg and not r_chg.isError()):
+                return (r_dis.registers[0] / 10.0, r_chg.registers[0] / 10.0)
+        except Exception as e:
+            logger.debug(f"get_energy_counters feilet: {e}")
         return None
 
     def get_battery_power(self) -> int:
