@@ -65,24 +65,43 @@ MultiPlus-II 48/5000 ×2        └─ EVCS HQ2309VTVNF (elbil-lader)
 
 ---
 
-## 3. Prisstruktur (Føie AS / Kraftriket, april 2026)
+## 3. Prisstruktur (Føie AS / Kraftriket + Norgespris, 2026)
 
-### Kjøpspris — FASTPRIS (eks mva, deretter ×1.25)
+### Kjøpspris — NORGESPRIS + spotavtale (eks mva, deretter ×1.25)
+
+Norgespris er en statlig støtteordning bestilt via Elhub/Føie AS.
+Den fungerer som et **pristak på 50 øre inkl. mva (= 40 øre eks mva)** på energileddet:
+
 ```
-Fastpris Kraftriket:    40.00 øre/kWh  (eks mva)
-+ Nettleie dag (06–22): 16.50 øre/kWh  → 20.63 inkl mva
-+ Nettleie natt (22–06):10.00 øre/kWh  → 12.50 inkl mva
-+ Forbruksavgift:        7.13 øre/kWh  →  8.91 inkl mva
-+ Enova:                 1.00 øre/kWh  →  1.25 inkl mva
+Spot eks mva <= 40 øre → betaler faktisk spot (Norgespris ikke aktiv, spot er billigst)
+Spot eks mva >  40 øre → betaler 40 øre eks mva (Norgespris dekker resten)
+
+energy_ore = min(spot_ore_eks_mva, 40.0)
+
++ Nettleie dag  (06–22): 16.50 øre eks mva → 20.63 inkl mva
++ Nettleie natt (22–06): 10.00 øre eks mva → 12.50 inkl mva
++ Forbruksavgift:         7.13 øre eks mva →  8.91 inkl mva
++ Enova:                  1.00 øre eks mva →  1.25 inkl mva
 × 1.25 mva
-= Dag-kjøpspris:  ~81.0 øre/kWh inkl mva
-= Natt-kjøpspris: ~72.7 øre/kWh inkl mva
 ```
-> Norgespris gjelder IKKE — fastprisavtale gir ikke rett til støtten (kun spot > 73 øre)
 
-### Salgspris (plusskunde, spot eks mva)
+**Konkrete eksempler:**
+
+| Scenario | Spot eks mva | Norgespris aktiv | Kjøpspris inkl mva |
+|---|---|---|---|
+| Natt, ekstremt billig | 5 øre | Nei | (5+10+7.13+1)×1.25 = **28.9 øre** |
+| Natt, billig | 15 øre | Nei | (15+10+7.13+1)×1.25 = **41.4 øre** |
+| Natt, over cap | 60 øre | Ja (cap=40) | (40+10+7.13+1)×1.25 = **72.7 øre** |
+| Dag, middels | 100 øre | Ja (cap=40) | (40+16.5+7.13+1)×1.25 = **81.0 øre** |
+| Dag, dyrt | 200 øre | Ja (cap=40) | (40+16.5+7.13+1)×1.25 = **81.0 øre** |
+
+> Dag-kjøpspris er alltid 81.0 øre inkl mva (spot > 40 øre eks mva nesten alltid på dagtid).
+> Natt-kjøpspris varierer: 28–73 øre avhengig av spotpris.
+
+### Salgspris (plusskunde, ingen mva)
 ```
 Spotpris Nordpool NO1 eks mva  (variabel, ingen påslag eller fradrag)
+Kraftriket betaler spot direkte — ingen mellomledd.
 ```
 
 ### Kapasitetsledd (Føie AS 2026, inkl mva)
@@ -264,37 +283,47 @@ Den dekker **ikke** batterislitasje fra sykling.
 | Brukbar energi per syklus | 31.9 kWh |
 | **Batterikostnad per kWh** | **~1.57 kr/kWh** |
 
-### 8.3 Arbitrasje — lønnsomhetsgrense
+### 8.3 Arbitrasje — lønnsomhetsgrense med Norgespris
 
-For at arbitrasje skal være lønnsomt må spread dekke batterikostnad + round-trip tap:
+Med Norgespris-logikk er natt-lading **vesentlig billigere** enn tidligere antatt:
 
+**Typisk natt (spot 15 øre eks mva):**
 ```
-Salgspris (spot, eks mva, typisk mai):   ~110 øre/kWh
-Round-trip tap 5%:                        −5.5 øre/kWh
-Batterislitasje:                        −157.0 øre/kWh
-──────────────────────────────────────────────────────
-Netto per kWh:   110 − 5.5 − 157 = −52 øre  → IKKE lønnsomt
+Kjøp natt:  (15 + 10 + 7.13 + 1) × 1.25 = 41.4 øre inkl mva
+Salg dag:   spot eks mva (f.eks. 100 øre)
+Brutto spread: 100 − 41.4 = 58.6 øre
+Round-trip tap (5%): −5 øre
+Batterislitasje: −157 øre
+Netto: 58.6 − 5 − 157 = −103 øre → IKKE lønnsomt
 ```
 
-Med fastpris kjøp (81 øre dag) og spot-salg (110 øre) er **brutto spread ~29 øre**.
-Dette dekker IKKE batterislitasje på 157 øre/kWh.
+**Billig natt (spot 5 øre eks mva) vs dyg dag (spot 200 øre):**
+```
+Kjøp natt:  (5 + 10 + 7.13 + 1) × 1.25 = 28.9 øre inkl mva
+Salg dag:   200 øre eks mva
+Brutto spread: 200 − 28.9 = 171 øre
+Round-trip tap: −10 øre
+Batterislitasje: −157 øre
+Netto: 171 − 10 − 157 = +4 øre → marginalt lønnsomt
+```
 
-**Unntak: vinter-topper** — spot over ~300 øre og natt under 73 øre gir:
+**Vinter-topp (spot 5 øre natt vs 400 øre dag):**
 ```
-300 − 5% − 73 = +212 øre brutto spread
-212 − 157 = +55 øre netto → lønnsomt
+Kjøp: 28.9 øre / Salg: 400 øre → spread 371 øre − 157 slitasje = +214 øre → lønnsomt
 ```
-**Konklusjon:** Arbitrasje er kun lønnsomt ved **ekstreme vinterdager**.
-Daglig sommer-arbitrasje sliter batteriet uten tilstrekkelig gevinst.
+
+**Konklusjon:** Norgespris gjør natt-lading billigere, men batterislitasje (157 øre/kWh)
+dominerer fortsatt. Arbitrasje er kun lønnsomt ved **stor spread** (>160 øre brutto).
 
 ### 8.4 Hva som faktisk er lønnsomt
 
 | Strategi | Batterislitasje | Gevinst | Vurdering |
 |---|---|---|---|
-| Peak-shaving | Minimal (liten energi, korte perioder) | 243.7 kr/mnd | ✅ Klart lønnsomt |
-| Sol-selvforbruk | Ingen (sol lader, batteri buffer) | Spart kjøpspris (81 øre/dag) | ✅ Klart lønnsomt |
-| Vinter-topp arbitrasje (spot >250 øre) | Lav (sjelden) | +50–150 øre/kWh netto | ✅ Lønnsomt |
-| Sommer-arbitrasje (spot 100–130 øre) | Medium | ~29 øre brutto − 157 øre slitasje | ❌ Ikke lønnsomt |
+| Peak-shaving | Minimal | 243.7 kr/mnd | ✅ Klart lønnsomt |
+| Sol-selvforbruk | Ingen | Spart 81 øre/kWh (dag) | ✅ Klart lønnsomt |
+| Natt-lading billig spot (<10 øre) + høy dag (>200 øre) | Lav | +4–50 øre netto | ✅ Lønnsomt ved stor spread |
+| Normal sommer-arbitrasje (spot 15→100 øre) | Medium | −103 øre netto | ❌ Ikke lønnsomt |
+| Vinter-topp (spot 5→400 øre) | Lav (sjelden) | +200+ øre netto | ✅ Svært lønnsomt |
 
 ### 8.5 Anbefalt konfigurasjon for batterilevetid
 
@@ -304,7 +333,7 @@ For å unngå destruktiv sykling bør arbitrasje kun trigge ved stor spread.
 Reell minimumsspread som dekker batterikostnad er ~90 øre, men dette er
 sjelden realistisk. Anbefalt tilnærming:
 
-- **Hev `MIN_PRICE_DIFF_NOK` til 0.50–0.80** for å begrense trading til ekstreme dager
+- **Hev `MIN_PRICE_DIFF_NOK` til 1.00–1.50** — brutto spread må være >160 øre for å dekke batterislitasje
 - La peak-shaving og sol-selvforbruk gjøre hoveddelen av jobben
 - Arbitrasje trigges automatisk ved virkelig store prisspreader (vinter-topper etc.)
 
@@ -424,14 +453,12 @@ EVCS_MIN_CURRENT_A=6
 EVCS_MAX_CURRENT_A=16
 EVCS_PHASES=1
 
-# Tariffer (Føie AS 2026, eks mva)
+# Tariffer (Føie AS 2026 + Norgespris, eks mva)
+NORGESPRIS_CAP_ORE=40.00    # 50 øre inkl mva — Norgespris pristak
 GRID_TARIFF_DAY_ORE=16.50
 GRID_TARIFF_NIGHT_ORE=10.00
 CONSUMPTION_TAX_ORE=7.13
 ENOVA_ORE=1.00
-SUPPLIER_MARKUP_ORE=6.50
-SELL_PRICE_ORE=75.00
-NET_SELL_BACK_ORE=6.25
 CAPACITY_CHARGE_NOK=662.50
 
 # Strategi
@@ -480,3 +507,4 @@ HA_TOKEN=<secret>
 | 2026-05-12 | main: fiks kumulativ peak-shaving jaging via `_original_charge_kw` |
 | 2026-05-12 | tariff: fiks `__main__` (fjernet ugyldig `NORGES_PRICE_ORE`-referanse) |
 | 2026-05-12 | config: `evcs_phases` default 3 → 1 (EVCS er 1-fase) |
+| 2026-05-12 | tariff: Norgespris-logikk — `buy_price = min(spot, 40 øre eks mva) + avgifter` |
