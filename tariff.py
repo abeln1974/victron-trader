@@ -83,15 +83,15 @@ def buy_price_ore(spot_ore: float, hour: int) -> float:
     """
     Beregn total reell innkjøpspris i øre/kWh inkl mva.
 
-    Norgespris-logikk: betaler min(spot, 40 øre eks mva) for energileddet.
-    Spot under 40 øre eks mva → betaler faktisk spot (billig natt).
-    Spot over  40 øre eks mva → betaler 40 øre (Norgespris aktiveres).
+    Norgespris er et pristak på 40 øre eks mva (50 øre inkl mva).
+    Du betaler alltid 40 øre eks mva uansett spotpris — staten dekker resten.
+    spot_ore-parameteret ignoreres for energileddet.
 
     Eksempler:
-      Natt, spot 15 øre: (15 + 10.00 + 7.13 + 1.00) × 1.25 = 41.4 øre inkl mva
-      Dag,  spot 100 øre: (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva
+      Natt: (40 + 10.00 + 7.13 + 1.00) × 1.25 = 72.7 øre inkl mva
+      Dag:  (40 + 16.50 + 7.13 + 1.00) × 1.25 = 81.0 øre inkl mva
     """
-    energy = min(spot_ore, NORGESPRIS_CAP_ORE)
+    energy = NORGESPRIS_CAP_ORE  # Alltid 40 øre eks mva — Norgespris er pristak, ikke variabel rabatt
     grid = GRID_TARIFF_DAY_ORE if is_day_tariff(hour) else GRID_TARIFF_NIGHT_ORE
     return (energy + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * VAT
 
@@ -156,11 +156,9 @@ def format_prices(spot_ore: float, hour: int) -> str:
     sell = sell_price_ore(spot_ore)
     profit = sell - buy
     tariff = "dag" if is_day_tariff(hour) else "natt"
-    norgespris_aktiv = spot_ore > NORGESPRIS_CAP_ORE
     return (
         f"Spot: {spot_ore:.1f} øre | "
-        f"Norgespris: {'aktiv' if norgespris_aktiv else 'ikke aktiv (spot < cap)'} | "
-        f"Kjøp ({tariff}): {buy:.1f} øre inkl mva | "
+        f"Kjøp ({tariff}): {buy:.1f} øre inkl mva (Norgespris 40+avgifter) | "
         f"Salg: {sell:.1f} øre | "
         f"Margin: {profit:+.1f} øre"
     )
