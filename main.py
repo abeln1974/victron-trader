@@ -310,7 +310,12 @@ class EnergyTrader:
             logger.info(f"Action: {action.action} @ {action.power_kw:.1f}kW | {action.reason}")
 
             prev_action = self.current_action
-            self._execute_action(action, soc, current.price_nok_kwh)
+            # Hent fersk SOC rett før execute for å unngå utdatert data
+            fresh_soc = self.victron.get_soc()
+            if fresh_soc is None:
+                fresh_soc = soc
+            self._execute_action(action, fresh_soc, current.price_nok_kwh)
+            # Les energitellere ved start av ny aktiv action (ikke ved idle)
             if action.action != 'idle' and (prev_action is None or prev_action.action == 'idle'):
                 self._action_start_counters = self.victron.get_energy_counters()
             self.current_action = action
@@ -391,10 +396,14 @@ class EnergyTrader:
 
     def _execute_action(self, action: Action, soc: float, price: float):
         if action.action == 'charge':
+            logger.info(f"CHARGE CHECK: SOC {soc:.1f}% vs MIN_SOC {CONFIG.min_soc:.1f}% vs MAX_SOC {CONFIG.max_soc:.1f}%")
             if soc >= CONFIG.max_soc:
                 logger.info("SOC ved maks, hopper over lading")
                 self.victron.stop_ess_control()
                 return
+            # Tillat lading når SOC < MIN_SOC - batteriet trenger å lade opp!
+            if soc < CONFIG.min_soc:
+                logger.info(f"SOC {soc:.1f}% < {CONFIG.min_soc}% — LADING NØDVENDIG (billigvindu)")
 
             grid_w = self._get_grid_power() or 0
             grid_kw = grid_w / 1000.0
