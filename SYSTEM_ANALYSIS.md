@@ -693,8 +693,8 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 | Problem | Impact | Anbefaling |
 |---------|--------|------------|
 | **AC-Fronius lader forbi 90%** | Lav | MQTT `SocLimitForFloat` — seksjon 6.5 |
-| **SmartShunt reg 310 teller ikke** | Medium | Verifiser firmware/skala, ev. bytt register |
-| **Dashboard viser 0 handler** | Medium | Observer etter fiks — neste natt-lading kl 23:00 |
+| **SmartShunt reg 310 = 0** | Medium | Reg 309 (discharge) fungerer. For charge: SOC-delta fallback. Verifiser evt. firmware |
+| **Dashboard viser 0 handler** | Medium | DB_PATH fikset, men 0 trades ennå (venter natt-lading kl 23:00 for å verifisere) |
 | **Ingen discharge-aksjoner mai** | Lav | Spot for lav (~75-130 øre). Venter til vinter |
 
 ---
@@ -748,7 +748,7 @@ arbitrasje alene gitt 10 000–20 000 kr/år og gjort prosjektet klart lønnsomt
 #### Umiddelbart (denne uken)
 1. ✅ **Verifiser trade logging** — observer neste natt-lading (kl 23:00→05:00)
 2. ✅ **Verifiser MIN_PRICE_DIFF_NOK=1.10** — unngå daglig arbitrasje
-3. ✅ **Sjekk VRM:** Peak shaving = OFF (kolliderer med trader)
+3. ✅ **Verifiser ESS-konfig** — se seksjon 6.6 for korrekte VRM-innstillinger
 
 #### Kort sikt (mai-juni)
 4. 🔧 **Implementer MQTT** for `SocLimitForFloat` (løser AC-Fronius 90%+)
