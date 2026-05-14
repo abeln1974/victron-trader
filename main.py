@@ -155,6 +155,11 @@ class EnergyTrader:
                     else:
                         actual_kwh = max(0.0, end_chg - start_chg)
                     kwh_source = "smartshunt"
+                    # Fallback til SOC-delta hvis SmartShunt gir 0 (reg 310 teller ikke alltid)
+                    if actual_kwh < 0.05 and self._action_start_soc is not None:
+                        delta_soc = abs(end_soc - self._action_start_soc)
+                        actual_kwh = CONFIG.battery_capacity_kwh * delta_soc / 100
+                        kwh_source = "soc-delta-fallback"
                 elif self._action_start_soc is not None:
                     delta_soc = abs(end_soc - self._action_start_soc)
                     actual_kwh = CONFIG.battery_capacity_kwh * delta_soc / 100

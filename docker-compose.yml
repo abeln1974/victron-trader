@@ -57,9 +57,12 @@ services:
       - EVCS_PHASES=${EVCS_PHASES:-1}
       - PEAK_LIMIT_KW=${PEAK_LIMIT_KW:-9.5}
 
+      # Database
+      - DB_PATH=/app/data/profit.db
+
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    
+
     volumes:
       # Persist database and logs
       - ./data:/app/data
