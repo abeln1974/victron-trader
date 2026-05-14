@@ -14,6 +14,8 @@ from tariff import (
 )
 from config import CONFIG, OSLO_TZ
 
+logger = logging.getLogger(__name__)
+
 # Føie AS nettleiepriser 2026 — kapasitetsledd (snitt 3 høyeste timer på ULIKE dager/mnd)
 # Trinn 3:  5– 9.99 kW =  418.8 kr/mnd inkl MVA  ← MÅL
 # Trinn 4: 10–14.99 kW =  662.5 kr/mnd inkl MVA  ← faktisk trinn apr 2026 (avregnet 12.09 kW)
@@ -96,6 +98,23 @@ class Optimizer:
             profitable_hours.add(idx)
             remaining_kwh -= min(self.max_discharge, remaining_kwh)
 
+        # --- Storm-mode: Sikkerhets-buffer ved lite sol ---
+        # Hvis prognose < 10 kWh (2t effektiv sol), øk min SOC for backup
+        solar_kwh_tomorrow = get_solar_kwh_tomorrow(
+            lat=CONFIG.site_lat,
+            lon=CONFIG.site_lon,
+            panel_peak_kw=CONFIG.solar_max_kw,
+            system_efficiency=CONFIG.solar_system_efficiency,
+        )
+        storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+        effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else self.min_soc
+
+        if storm_mode:
+            logger.warning(
+                f"🌧️ STORM-MODE AKTIV: Prognose {solar_kwh_tomorrow:.1f} kWh sol (<{CONFIG.storm_mode_threshold_kwh} kWh). "
+                f"MIN_SOC hevet {self.min_soc:.0f}% → {effective_min_soc:.0f}%, lader til {self.max_soc:.0f}%"
+            )
+
         # --- Finn de beste ladetimene (laveste kjopspris, kun natt) ---
         # Lademål: max_soc minus sol-reserve (dynamisk fra Open-Meteo MEPS / fallback statisk)
         solar_reserve_pct = get_solar_reserve_pct(
@@ -105,8 +124,10 @@ class Optimizer:
             battery_capacity_kwh=self.capacity,
             system_efficiency=CONFIG.solar_system_efficiency,
             fallback_hours=CONFIG.solar_fallback_hours,
+            solar_kwh_override=solar_kwh_tomorrow if solar_kwh_tomorrow > 0 else None,
         )
-        charge_target_soc = self.max_soc - solar_reserve_pct
+        # Storm-mode: Lad til høyere SOC for å ha backup
+        charge_target_soc = self.max_soc if storm_mode else (self.max_soc - solar_reserve_pct)
         charge_hours = set()
         night_candidates = sorted(
             [(i, bp) for i, bp in enumerate(buy_prices)
@@ -114,7 +135,7 @@ class Optimizer:
             key=lambda x: x[1]
         )
         discharged_kwh = len(profitable_hours) * self.max_discharge
-        soc_after_discharge = max(self.min_soc, current_soc - (discharged_kwh / self.capacity * 100))
+        soc_after_discharge = max(effective_min_soc, current_soc - (discharged_kwh / self.capacity * 100))
         # Beregn hvor mye som MÅ lades — legg til 20% buffer for peak-shaving-reduksjon
         space_kwh = self.capacity * (charge_target_soc - soc_after_discharge) / 100
         remaining_charge = max(0, space_kwh * 1.2)  # 20% buffer for peak-shaving-tap

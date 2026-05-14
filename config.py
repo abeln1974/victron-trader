@@ -56,6 +56,10 @@ class Config:
     min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.10"))  # Arbitrasje lønnsomt kun ved spot >233 øre eks mva
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))
 
+    # Storm-mode (sikkerhets-backup ved lite sol)
+    storm_mode_threshold_kwh: float = float(os.getenv("STORM_MODE_THRESHOLD_KWH", "10.0"))  # <10 kWh sol → storm mode
+    storm_mode_min_soc: float = float(os.getenv("STORM_MODE_MIN_SOC", "35"))  # Høyere floor ved storm mode
+
     # Paths
     db_path: str = os.getenv("DB_PATH", "./data/profit.db")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

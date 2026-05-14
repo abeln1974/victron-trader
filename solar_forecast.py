@@ -80,14 +80,16 @@ def get_solar_reserve_pct(lat: float, lon: float,
                            battery_capacity_kwh: float,
                            system_efficiency: float = 0.85,
                            fallback_hours: float = 4.0,
-                           max_reserve_pct: float = 40.0) -> float:
+                           max_reserve_pct: float = 40.0,
+                           solar_kwh_override: float = None) -> float:
     """
     Beregn sol-reserve i prosent av batterikapasitet for i morgen.
 
     Returnerer prosentandel SOC som skal reserveres for sol-lading.
     Ved API-feil returneres fallback (statisk beregning basert på fallback_hours).
     """
-    solar_kwh = get_solar_kwh_tomorrow(lat, lon, panel_peak_kw, system_efficiency)
+    solar_kwh = solar_kwh_override if solar_kwh_override is not None else \
+                get_solar_kwh_tomorrow(lat, lon, panel_peak_kw, system_efficiency)
 
     if solar_kwh > 0:
         reserve_pct = min(max_reserve_pct, (solar_kwh / battery_capacity_kwh) * 100)
