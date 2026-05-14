@@ -157,20 +157,23 @@ class Optimizer:
             buy_ore = buy_prices[i]
 
             # UTLAD: Kun i de planlagte topp-timene
-            if i in profitable_hours and soc > self.min_soc:
-                avail_kwh = max(0, self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve)
+            if i in profitable_hours and soc > effective_min_soc:
+                avail_kwh = max(0, self.capacity * (soc - effective_min_soc) / 100 - self.peak_reserve)
                 power = min(self.max_discharge, avail_kwh)
                 if power > 0:
                     s_ore = sell_ore(p)
                     savings = buy_ore - s_ore
                     profit = power * savings / 100
+                    reason = f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}o (salg {s_ore:.0f}o)'
+                    if storm_mode:
+                        reason += f' [STORM: floor {effective_min_soc:.0f}%]'
                     actions.append(Action(
                         timestamp=p.timestamp, action='discharge',
                         power_kw=-power, expected_profit_nok=profit,
-                        reason=f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}o (salg {s_ore:.0f}o)'
+                        reason=reason
                     ))
                     soc_change = (power / self.efficiency / self.capacity) * 100
-                    soc = max(soc - soc_change, self.min_soc)
+                    soc = max(soc - soc_change, effective_min_soc)
                     continue
 
             # LAD: Kun i de planlagte billige natte-timene
