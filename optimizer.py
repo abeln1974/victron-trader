@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import logging
 from price_fetcher import PricePoint, PriceFetcher
-from solar_forecast import get_solar_reserve_pct
+from solar_forecast import get_solar_reserve_pct, get_solar_kwh_tomorrow
 from tariff import (
     buy_price_ore, sell_price_ore, should_charge, should_discharge,
     capacity_charge_for_kw, CAPACITY_CHARGE_NOK,
