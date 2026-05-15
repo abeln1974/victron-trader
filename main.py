@@ -135,7 +135,7 @@ class EnergyTrader:
 
             action_hour = self.current_action.timestamp.astimezone(OSLO_TZ).hour if self.current_action else -1
             if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
-                if current_time - last_keepalive >= 30:  # Victron krever maks 60s — 30s er trygg margin
+                if current_time - last_keepalive >= 8:  # Reg 37 VE.Bus timeout ~10s — 8s er trygg margin
                     if self.current_action.action == 'discharge':
                         if current_time - self._action_start_time < 45:
                             self.victron.send_keepalive()
