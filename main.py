@@ -48,12 +48,12 @@ class EnergyTrader:
         time.sleep(1)
 
         self.victron.stop_ess_control()
-        logger.info("Startup-reset: reg37=0, Hub4Mode=2")
+        logger.info("Startup-reset: reg37=0, Hub4Mode=3 (trader tar kontroll)")
 
         mode = self.victron.get_ess_mode()
-        logger.info(f"ESS modus: {mode} (2=Optimized, 4=ExternalControl)")
-        if mode != self.victron.HUB4_MODE_OPTIMIZED:
-            logger.warning(f"ESS modus er {mode}, forventet 2")
+        if mode != self.victron.HUB4_MODE_DISABLED:
+            logger.warning(f"ESS modus er {mode}, forventet 3 — forsøker å sette Mode 3")
+            self.victron.enable_external_control()
 
         self.victron.set_min_soc(CONFIG.min_soc)
         logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%")
@@ -133,29 +133,27 @@ class EnergyTrader:
                     pass
                 last_peak_shave = current_time
 
+            # Keepalive: send setpoint hvert 8s uansett — holder Mode 3 aktiv
+            # Ved krasj stopper keepalive → Passthru → Victron tar Mode 2 automatisk
+            if current_time - last_keepalive >= 8:
+                self.victron.send_keepalive()
+                last_keepalive = current_time
+
             action_hour = self.current_action.timestamp.astimezone(OSLO_TZ).hour if self.current_action else -1
             if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
-                if current_time - last_keepalive >= 8:  # Reg 37 VE.Bus timeout ~10s — 8s er trygg margin
-                    if self.current_action.action == 'discharge':
-                        if current_time - self._action_start_time < 45:
-                            self.victron.send_keepalive()
-                            last_keepalive = current_time
-                            time.sleep(3)
-                            continue
-                        battery_w = self.victron.get_battery_power() or 0
-                        discharge_w = abs(self.current_action.power_kw) * 1000
-                        if battery_w > -(discharge_w * 0.4):
-                            logger.warning(
-                                f"Export-guard: Batteri {battery_w:.0f}W (forventer <-{discharge_w*0.4:.0f}W) — stopper"
-                            )
-                            self.victron.stop_ess_control()
-                            self.current_action = None
-                            self._action_start_soc = None
-                        else:
-                            self.victron.send_keepalive()
-                    else:
-                        self.victron.send_keepalive()
-                    last_keepalive = current_time
+                if self.current_action.action == 'discharge':
+                    if current_time - self._action_start_time < 45:
+                        time.sleep(3)
+                        continue
+                    battery_w = self.victron.get_battery_power() or 0
+                    discharge_w = abs(self.current_action.power_kw) * 1000
+                    if battery_w > -(discharge_w * 0.4):
+                        logger.warning(
+                            f"Export-guard: Batteri {battery_w:.0f}W (forventer <-{discharge_w*0.4:.0f}W) — stopper"
+                        )
+                        self.victron.stop_ess_control()
+                        self.current_action = None
+                        self._action_start_soc = None
 
             elif self.current_action and self.current_action.action != 'idle' and action_hour != now.hour:
                 end_soc = self.victron.get_soc() or 0
@@ -215,8 +213,8 @@ class EnergyTrader:
             return
 
         if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — float: ESS Mode 2, Fronius styrer (NMC-vern)")
-            self.victron.stop_ess_control()  # Sikrer Mode 2 — ingen aktiv lading fra trader
+            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — float: setpoint=0, Mode 3 beholdes (NMC-vern)")
+            self.victron.stop_ess_control()  # setpoint → 0, Mode 3 beholdes
             self._dvcc_charging_stopped = True
         elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
             logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — lading tillatt igjen")
@@ -389,10 +387,10 @@ class EnergyTrader:
 
     def stop(self):
         self.running = False
-        logger.info("Stopper...")
+        logger.info("Stopper — gir kontroll tilbake til Victron ESS...")
         self.evcs.restore_auto()
         if hasattr(self.victron, '_connected') and self.victron._connected:
-            self.victron.stop_ess_control()
+            self.victron.release_control()  # Hub4Mode → 2, setpoint → 0
             time.sleep(1)
             self.victron.disconnect()
         logger.info("Stoppet")
