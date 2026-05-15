@@ -344,14 +344,20 @@ class EnergyTrader:
             grid_kw = grid_w / 1000.0
             peak_kw = self.optimizer.peak_limit_kw
 
-            # KRITISK: Kontinuerlig MIN_SOC beskyttelse
-            if soc < CONFIG.min_soc:
-                logger.warning(f"MIN_SOC BESKYTTELSE: SOC {soc:.1f}% < MIN_SOC {CONFIG.min_soc}% - STOPPER DISCHARGE")
+            # KRITISK: Kontinuerlig MIN_SOC beskyttelse med storm mode
+            # Sjekk storm mode status (samme logikk som optimizer)
+            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+            effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
+            
+            if soc < effective_min_soc:
+                mode_str = "STORM MODE" if storm_mode else "NORMAL"
+                logger.warning(f"{mode_str} MIN_SOC BESKYTTELSE: SOC {soc:.1f}% < {effective_min_soc}% - STOPPER DISCHARGE")
                 if self.current_action and self.current_action.action == 'discharge':
                     self.victron.stop_ess_control()
                     self.current_action = None
-                    logger.info("Emergency stop: SOC under MIN_SOC")
-                return
+                    logger.info(f"Emergency stop: SOC under {mode_str.lower()} MIN_SOC")
+                # IKKE returner her - tillat peak shaving selv under MIN_SOC hvis batteriet har kapasitet
 
             if grid_kw <= peak_kw + 0.3:
                 return
@@ -405,14 +411,20 @@ class EnergyTrader:
 
     def _execute_action(self, action: Action, soc: float, price: float):
         if action.action == 'charge':
-            logger.info(f"CHARGE CHECK: SOC {soc:.1f}% vs MIN_SOC {CONFIG.min_soc:.1f}% vs MAX_SOC {CONFIG.max_soc:.1f}%")
+            # Sjekk storm mode status for MIN_SOC
+            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+            effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
+            mode_str = "STORM" if storm_mode else "NORMAL"
+            
+            logger.info(f"CHARGE CHECK: SOC {soc:.1f}% vs {mode_str} MIN_SOC {effective_min_soc:.1f}% vs MAX_SOC {CONFIG.max_soc:.1f}%")
             if soc >= CONFIG.max_soc:
                 logger.info("SOC ved maks, hopper over lading")
                 self.victron.stop_ess_control()
                 return
-            # Tillat lading når SOC < MIN_SOC - batteriet trenger å lade opp!
-            if soc < CONFIG.min_soc:
-                logger.info(f"SOC {soc:.1f}% < {CONFIG.min_soc}% — LADING NØDVENDIG (billigvindu)")
+            # Tillat lading når SOC < effective_min_soc - batteriet trenger å lade opp!
+            if soc < effective_min_soc:
+                logger.info(f"SOC {soc:.1f}% < {effective_min_soc}% — LADING NØDVENDIG ({mode_str.lower()}vindu)")
 
             grid_w = self._get_grid_power() or 0
             grid_kw = grid_w / 1000.0
@@ -434,8 +446,14 @@ class EnergyTrader:
                 self.current_action = action
 
         elif action.action == 'discharge':
-            if soc <= CONFIG.min_soc:
-                logger.info("SOC ved min, hopper over utlading")
+            # Sjekk storm mode status for MIN_SOC
+            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+            effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
+            
+            if soc <= effective_min_soc:
+                mode_str = "STORM" if storm_mode else "NORMAL"
+                logger.info(f"SOC ved {mode_str.lower()} min ({effective_min_soc}%), hopper over utlading")
                 self.victron.stop_ess_control()
                 return
 
