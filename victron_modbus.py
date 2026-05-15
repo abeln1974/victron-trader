@@ -314,35 +314,42 @@ class VictronModbus:
         return False
 
     def stop_ess_control(self) -> bool:
-        """Returner kontroll til GX/ESS Optimized — NMC-vennlig idle.
-        Bytter Hub4Mode tilbake til 2 (Optimized without BatteryLife)."""
+        """Idle: setpoint=0 men beholder Hub4Mode=3 (trader eier fortsatt).
+        Victron går til Passthru automatisk hvis keepalive stopper (krasj/shutdown)."""
         self._last_setpoint = 0
         if not self.readonly:
             try:
-                # Nullstill VE.Bus setpoint
                 self.client.write_register(
                     address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
                     device_id=self.UNIT_VEBUS)
-                # Bytt Hub4Mode tilbake til 2
-                r = self.client.read_holding_registers(
-                    address=self.REG_HUB4_MODE, count=1, device_id=self.UNIT_SYSTEM)
-                if r and not r.isError() and r.registers[0] != self.HUB4_MODE_OPTIMIZED:
-                    self.client.write_register(
-                        address=self.REG_HUB4_MODE, value=self.HUB4_MODE_OPTIMIZED,
-                        device_id=self.UNIT_SYSTEM)
-                    logger.info("Hub4Mode → 2 (idle, GX overtar)")
+                logger.debug("ESS setpoint → 0W (idle, Mode 3 beholdes)")
+            except Exception:
+                pass
+        return True
+
+    def release_control(self) -> bool:
+        """Gi kontroll tilbake til Victron ESS — kun ved planlagt shutdown.
+        Bytter Hub4Mode → 2 (Optimized) og nullstiller setpoint."""
+        self._last_setpoint = 0
+        if not self.readonly:
+            try:
+                self.client.write_register(
+                    address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
+                    device_id=self.UNIT_VEBUS)
+                self.client.write_register(
+                    address=self.REG_HUB4_MODE, value=self.HUB4_MODE_OPTIMIZED,
+                    device_id=self.UNIT_SYSTEM)
+                logger.info("Hub4Mode → 2 (Optimized) — planlagt shutdown, GX overtar")
             except Exception:
                 pass
         return True
 
     def send_keepalive(self) -> bool:
-        """
-        Gjenta siste setpoint på reg 37 (VE.Bus). Mode 3 krever skriving
-        minst hvert 10. sekund — ellers nullstilles setpointet av Multi.
+        """Send setpoint hvert 8s for å holde Mode 3 aktiv.
+        Sender alltid — også 0W i idle — for å hindre Passthru-timeout (~10s).
+        Ved krasj stopper keepalive → Multi går til Passthru → Victron tar Mode 2.
         """
         last = getattr(self, '_last_setpoint', 0)
-        if last == 0:
-            return True  # ingen aktiv setpoint, ikke nodvendig
         return self.set_grid_setpoint(last)
 
     def set_max_discharge_power(self, watts: int) -> bool:
