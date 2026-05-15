@@ -29,7 +29,7 @@ class Config:
     battery_max_charge_kw: float = float(os.getenv("BATTERY_MAX_CHARGE_KW", "10"))
     battery_max_discharge_kw: float = float(os.getenv("BATTERY_MAX_DISCHARGE_KW", "10"))
     battery_efficiency: float = float(os.getenv("BATTERY_EFFICIENCY", "0.95"))
-    min_soc: float = float(os.getenv("MIN_SOC", "20"))   # NMC: 20% (Victron floor 10%)
+    min_soc: float = float(os.getenv("MIN_SOC", "35"))   # NMC: 35% nødstrøm-buffer (24t @ 800W)
     max_soc: float = float(os.getenv("MAX_SOC", "90"))   # NMC: unngå langvarig >90%
 
     # Solar (Fronius Primo 5kW AC-coupled)
@@ -53,7 +53,7 @@ class Config:
     evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (EVCS HQ2309VTVNF er 1-fase)
 
     # Strategy
-    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.10"))  # Arbitrasje lønnsomt kun ved spot >233 øre eks mva
+    min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.10"))  # 1.00 kr/kWh batterislitasje + margin
     forecast_hours: int = int(os.getenv("FORECAST_HOURS", "24"))
 
     # Storm-mode (sikkerhets-backup ved lite sol)
