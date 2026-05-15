@@ -439,10 +439,10 @@ class EnergyTrader:
                 self.current_action = action
 
         else:
-            self.victron.stop_ess_control()
+            self.victron.release_control()  # Bytt til Mode 2 for ekte idle
             self.current_action = None
             self._original_charge_kw = 0.0
-            logger.info("Idle — ESS styrer selv")
+            logger.info("Idle — Victron ESS tar over (Mode 2)")
 
     def _log_status(self):
         soc   = self.victron.get_soc()

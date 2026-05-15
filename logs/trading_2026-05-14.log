@@ -1,0 +1,29 @@
+# Trading Log to. 14. mai 23:17:42 +0200 2026
+## System Status: to. 14. mai 23:17:42 +0200 2026
+- SOC: 20.4%
+- Lading: 
+- Storm mode: Inaktiv
+- Solprognose: 12.919999999999998 kWh
+
+## Nattens ladeplan:
+- Mål SOC ved 06:00: 69.7%
+- Planlagte ladetimer: 3 (23-02)
+- Total lading: 24.0 kW
+
+## Logger:
+
+
+## Kommandoer for i morgen:
+# Se live status:
+curl -s http://localhost:8080
+
+# Se logger:
+docker logs --tail=50 victron-trader
+tail -f logs/trading_2026-05-14.log
+
+# Sjekk SOC:
+docker exec victron-trader python -c "import sys; sys.path.append('/app'); from main import EnergyTrader; t=EnergyTrader(); t.victron.connect(); print(f'SOC: {t.victron.get_soc()}%')"
+
+# Trigger trade cycle:
+docker exec victron-trader python -c "import sys; sys.path.append('/app'); from main import EnergyTrader; t=EnergyTrader(); t.victron.connect(); t._execute_trade_cycle()"
+

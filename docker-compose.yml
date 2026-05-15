@@ -37,6 +37,7 @@ services:
       - DB_PATH=/app/data/profit.db
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
+      # Persist database and logs (permanent storage)
       - /opt/victron-trader/data:/app/data
       - /opt/victron-trader/logs:/app/logs
     deploy:
@@ -92,3 +93,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Optional: Bridge network (hvis ikke host network)
+# networks:
+#   victron-net:
+#     driver: bridge
