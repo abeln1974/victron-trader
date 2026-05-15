@@ -58,7 +58,7 @@ class Config:
 
     # Storm-mode (sikkerhets-backup ved lite sol)
     storm_mode_threshold_kwh: float = float(os.getenv("STORM_MODE_THRESHOLD_KWH", "10.0"))  # <10 kWh sol → storm mode
-    storm_mode_min_soc: float = float(os.getenv("STORM_MODE_MIN_SOC", "35"))  # Høyere floor ved storm mode
+    storm_mode_min_soc: float = float(os.getenv("STORM_MODE_MIN_SOC", "45"))  # Høyere floor ved storm mode (45% = 30 timer nødstrøm)
 
     # Paths
     db_path: str = os.getenv("DB_PATH", "./data/profit.db")
