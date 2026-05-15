@@ -42,6 +42,7 @@ def _poll_cerbo():
                 soc     = vic.get_soc()
                 solar_w = vic.get_solar_power()
                 bat_raw = vic._read_signed16(842)
+                bat_raw = -bat_raw if bat_raw is not None else None  # reg 842 negativ=lading på dette systemet
 
                 # Grid: Qubino primær (total inkl L3 via _w_6), VM-3P75CT fallback
                 qpower = qubino.get_grid_power()
