@@ -344,6 +344,15 @@ class EnergyTrader:
             grid_kw = grid_w / 1000.0
             peak_kw = self.optimizer.peak_limit_kw
 
+            # KRITISK: Kontinuerlig MIN_SOC beskyttelse
+            if soc < CONFIG.min_soc:
+                logger.warning(f"MIN_SOC BESKYTTELSE: SOC {soc:.1f}% < MIN_SOC {CONFIG.min_soc}% - STOPPER DISCHARGE")
+                if self.current_action and self.current_action.action == 'discharge':
+                    self.victron.stop_ess_control()
+                    self.current_action = None
+                    logger.info("Emergency stop: SOC under MIN_SOC")
+                return
+
             if grid_kw <= peak_kw + 0.3:
                 return
 
