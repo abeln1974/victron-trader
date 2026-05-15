@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 
 class EnergyTrader:
+    _STATE_FILE = os.path.join(os.path.dirname(os.getenv("DB_PATH", "./data/profit.db")), "trader_state.json")
+
     def __init__(self):
         self.price_fetcher = PriceFetcher()
         self.optimizer = Optimizer()
@@ -35,7 +37,63 @@ class EnergyTrader:
         self.current_action: Optional[Action] = None
         self._action_start_time: float = 0.0
         self._last_price_count: int = 0
-        self._original_charge_kw: float = 0.0  # Ladeeffekt ved time-start — brukes av peak-shave som referanse
+        self._original_charge_kw: float = 0.0
+
+    def _save_state(self):
+        """Lagre current_action til disk så den overlever restart."""
+        try:
+            if self.current_action and self.current_action.action != 'idle':
+                state = {
+                    "action": self.current_action.action,
+                    "power_kw": self.current_action.power_kw,
+                    "timestamp": self.current_action.timestamp.isoformat(),
+                    "action_start_soc": getattr(self, '_action_start_soc', None),
+                    "last_price_nok": getattr(self, '_last_price_nok', 0.0),
+                }
+                os.makedirs(os.path.dirname(self._STATE_FILE) or ".", exist_ok=True)
+                with open(self._STATE_FILE, "w") as f:
+                    import json
+                    json.dump(state, f)
+            else:
+                if os.path.exists(self._STATE_FILE):
+                    os.remove(self._STATE_FILE)
+        except Exception as e:
+            logger.debug(f"_save_state feilet: {e}")
+
+    def _restore_state(self):
+        """Gjenopprett action fra forrige kjøring og logg eventuell handel."""
+        try:
+            if not os.path.exists(self._STATE_FILE):
+                return
+            import json
+            with open(self._STATE_FILE) as f:
+                state = json.load(f)
+            prev_action = state.get("action")
+            prev_hour = datetime.fromisoformat(state["timestamp"]).astimezone(OSLO_TZ).hour
+            now_hour = datetime.now(OSLO_TZ).hour
+            prev_start_soc = state.get("action_start_soc")
+            prev_price_nok = state.get("last_price_nok", 0.0)
+
+            logger.info(f"Gjenopprettet state: {prev_action} fra time {prev_hour:02d} (nå {now_hour:02d})")
+
+            # Hvis handlingen er fra en annen time — logg den som ferdig
+            if prev_action in ('charge', 'discharge') and prev_hour != now_hour:
+                end_soc = self.victron.get_soc() or 0
+                if prev_start_soc is not None:
+                    delta_soc = abs(end_soc - prev_start_soc)
+                    actual_kwh = CONFIG.battery_capacity_kwh * delta_soc / 100
+                    if actual_kwh > 0.05:
+                        db_action = "sell" if prev_action == "discharge" else "buy"
+                        spot_eks_mva = prev_price_nok / CONFIG.vat
+                        price_nok = (sell_price_ore(spot_eks_mva * 100) if db_action == "sell"
+                                     else buy_price_ore(spot_eks_mva * 100, prev_hour)) / 100
+                        self.tracker.log_trade(db_action, actual_kwh, price_nok)
+                        logger.info(f"Gjenopprettet handel logget: {prev_action} {actual_kwh:.2f} kWh "
+                                    f"(SOC {prev_start_soc:.1f}%→{end_soc:.1f}%)")
+
+            os.remove(self._STATE_FILE)
+        except Exception as e:
+            logger.warning(f"_restore_state feilet: {e}")
 
     def start(self):
         logger.info("Starting Energy Trader...")
@@ -59,11 +117,13 @@ class EnergyTrader:
         logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%")
 
         self._action_start_soc: Optional[float] = None
-        self._action_start_counters: Optional[tuple] = None  # (discharged_kwh, charged_kwh) ved action-start
+        self._action_start_counters: Optional[tuple] = None
         self._last_price_nok: float = 0.0
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+
+        self._restore_state()
 
         try:
             self._main_loop()
@@ -251,10 +311,10 @@ class EnergyTrader:
 
             prev_action = self.current_action
             self._execute_action(action, soc, current.price_nok_kwh)
-            # Les energitellere ved start av ny aktiv action (ikke ved idle)
             if action.action != 'idle' and (prev_action is None or prev_action.action == 'idle'):
                 self._action_start_counters = self.victron.get_energy_counters()
             self.current_action = action
+            self._save_state()
 
             stats = self.tracker.get_stats()
             logger.info(f"Dagens profitt: {stats['today_profit_nok']:.2f} kr")
@@ -405,3 +465,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
