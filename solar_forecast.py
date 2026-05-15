@@ -16,6 +16,7 @@ from config import CONFIG, OSLO_TZ
 log = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
+_last_warning_time: float = 0.0  # Throttle feilmeldinger til maks 1/time
 
 
 def _fetch_radiation(lat: float, lon: float) -> dict:
@@ -68,7 +69,12 @@ def get_solar_kwh_tomorrow(lat: float, lon: float,
         return total_kwh
 
     except urllib.error.URLError as e:
-        log.warning("Open-Meteo ikke tilgjengelig: %s — bruker statisk sol-reserve", e)
+        global _last_warning_time
+        import time
+        now = time.monotonic()
+        if now - _last_warning_time >= 3600:
+            log.warning("Open-Meteo ikke tilgjengelig: %s — bruker statisk sol-reserve", e)
+            _last_warning_time = now
         return 0.0
     except Exception as e:
         log.warning("Sol-prognose feil: %s — bruker statisk sol-reserve", e)
@@ -115,3 +121,4 @@ if __name__ == "__main__":
     print(f"Sol i morgen: {kwh:.1f} kWh")
     print(f"Sol-reserve:  {reserve:.1f}% SOC")
     print(f"Lademål natt: {CONFIG.max_soc - reserve:.1f}% SOC")
+
