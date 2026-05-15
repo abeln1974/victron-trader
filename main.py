@@ -14,6 +14,7 @@ from victron_modbus import VictronModbus
 from profit_tracker import ProfitTracker
 from ha_qubino import QubinoReader, EVCSController
 from tariff import sell_price_ore, buy_price_ore
+from solar_forecast import get_solar_kwh_tomorrow
 
 logging.basicConfig(
     level=getattr(logging, CONFIG.log_level),
@@ -346,7 +347,7 @@ class EnergyTrader:
 
             # KRITISK: Kontinuerlig MIN_SOC beskyttelse med storm mode
             # Sjekk storm mode status (samme logikk som optimizer)
-            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             
@@ -412,7 +413,7 @@ class EnergyTrader:
     def _execute_action(self, action: Action, soc: float, price: float):
         if action.action == 'charge':
             # Sjekk storm mode status for MIN_SOC
-            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             mode_str = "STORM" if storm_mode else "NORMAL"
@@ -447,7 +448,7 @@ class EnergyTrader:
 
         elif action.action == 'discharge':
             # Sjekk storm mode status for MIN_SOC
-            solar_kwh_tomorrow = self.solar_forecast.get_tomorrow_kwh()
+            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             
@@ -466,10 +467,10 @@ class EnergyTrader:
                 self.current_action = action
 
         else:
-            self.victron.release_control()  # Bytt til Mode 2 for ekte idle
+            self.victron.stop_ess_control()  # setpoint=0, Mode 3 beholdes
             self.current_action = None
             self._original_charge_kw = 0.0
-            logger.info("Idle — Victron ESS tar over (Mode 2)")
+            logger.info("Idle — ESS styrer (Mode 3, setpoint=0)")
 
     def _log_status(self):
         soc   = self.victron.get_soc()
