@@ -188,7 +188,7 @@ class EVCSController:
         self._peak_kw = CONFIG.peak_limit_kw         # 9.5 kW
         self._cache: dict = {}
         self._last_fetch = 0.0
-        self._last_current_a: int = 0  # Siste satte strøm
+        self._last_current_a: int = -1  # -1 = ukjent ved oppstart, synkroniseres ved første fetch
 
     # ------------------------------------------------------------------ #
     # HA-kall                                                              #
@@ -214,6 +214,14 @@ class EVCSController:
                 self._cache = {s["entity_id"]: s["state"]
                                for s in r.json() if s["entity_id"] in wanted}
                 self._last_fetch = __import__("time").monotonic()
+                # Synkroniser _last_current_a fra faktisk EVCS-tilstand ved oppstart
+                if self._last_current_a == -1:
+                    try:
+                        actual_a = float(self._cache.get(f"sensor.{self._prefix}_current", 0))
+                        self._last_current_a = int(actual_a)
+                        logger.info(f"EVCS oppstart-sync: faktisk strøm={self._last_current_a}A")
+                    except (ValueError, TypeError):
+                        self._last_current_a = 0
                 return True
         except Exception as e:
             logger.debug(f"EVCS fetch feil: {e}")
