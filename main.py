@@ -347,10 +347,7 @@ class EnergyTrader:
 
             # KRITISK: Kontinuerlig MIN_SOC beskyttelse med storm mode
             # Sjekk storm mode status (samme logikk som optimizer)
-<<<<<<< HEAD
-=======
             from solar_forecast import get_solar_kwh_tomorrow
->>>>>>> 57224e1 (docs: Complete system analysis with DESS comparison)
             solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
@@ -453,10 +450,7 @@ class EnergyTrader:
 
         elif action.action == 'discharge':
             # Sjekk storm mode status for MIN_SOC
-<<<<<<< HEAD
-=======
             from solar_forecast import get_solar_kwh_tomorrow
->>>>>>> 57224e1 (docs: Complete system analysis with DESS comparison)
             solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
@@ -476,11 +470,7 @@ class EnergyTrader:
                 self.current_action = action
 
         else:
-<<<<<<< HEAD
-            self.victron.stop_ess_control()  # setpoint=0, Mode 3 beholdes
-=======
             self.victron.stop_ess_control()  # Behold Mode 3 med setpoint=0
->>>>>>> 57224e1 (docs: Complete system analysis with DESS comparison)
             self.current_action = None
             self._original_charge_kw = 0.0
             logger.info("Idle — ESS styrer (Mode 3, setpoint=0)")
