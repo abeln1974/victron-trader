@@ -2,55 +2,13 @@
 
 Automatisk strømhandel og peak-shaving med Victron ESS. Kjøper strøm billig (natt), selger/bruker fra batteri når strøm er dyr (dag), og hindrer at grid-effekt overstiger 10 kW (Føie AS kapasitetstrinn).
 
----
-
-## Overview (English)
-
-**Victron Energy Trader** is a Norwegian-specific home battery optimization system that maximizes value from Victron ESS installations through three strategies:
-
-1. **Peak-shaving** — Avoids capacity charges by keeping grid consumption below 9.5 kW (saves ~€25/month)
-2. **Solar self-consumption** — Stores excess solar for evening use instead of exporting at low prices
-3. **Arbitrage trading** — Charges at night (cheap), sells during expensive day hours (only when profitable)
-
-### Key Features
-
-- **Direct Modbus-TCP control** — No Home Assistant dependency for core operation, works offline
-- **1-phase EVCS coordination** — Pauses EV charging during battery discharge, uses solar surplus
-- **Nordic grid pricing** — Correctly handles Norwegian capacity tiers (Føie AS), fixed-price contracts with price cap (Norgespris), and day/night tariffs
-- **Dynamic solar reserve** — Uses Open-Meteo weather forecasts to plan overnight charging
-- **Failsafe operation** — Auto-reverts to Victron's native ESS control on errors or shutdown
-
-### Hardware Requirements
-
-- Victron MultiPlus-II (48V, tested with 2×5000W)
-- Victron Cerbo GX (Modbus-TCP enabled)
-- Battery: 4×12kWh NMC (tested with Receel refurbished)
-- Solar: 5 kW Fronius Primo AC-coupled
-- Grid meter: Qubino 3-phase smart meter via Z-Wave/HA (or Victron VM-3P75CT)
-- EV charger: Victron EVCS (1-phase)
-
-### Why Not Just Use Victron Dynamic ESS?
-
-This system is specifically designed for **Norwegian grid conditions**:
-
-- Dynamic ESS doesn't support fixed-price contracts (Norgespris price cap)
-- No built-in peak-shaving for Norwegian capacity tiers (saves 244 NOK/month)
-- No EVCS coordination during battery discharge
-- Requires VRM cloud; this works entirely locally
-
-### License
-
-AGPL-3.0 — You are free to use, modify, and distribute, but must share source code for any public deployments.
-
----
-
-## Anlegget (Norwegian)
+## Anlegget
 
 | Komponent | Detalj |
 |-----------|--------|
 | Cerbo GX | v3.72, IP 192.168.1.60, VRM site 411797 |
 | Invertere | 2× MultiPlus-II 48/5000/70-50 parallell |
-| Batteri | 4× 12kWh NMC Receel refurbished = 42.8kWh netto (45.6 kWh SmartShunt 800Ah×57V) |
+| Batteri | 4× 12.5kWh NMC = 50kWh (45.6 kWh målt SmartShunt 800Ah×57V), ekstern BMS |
 | Sol | Fronius Primo 5kW (AC-koblet, AC output) |
 | Grid-måler | Qubino ZMNHXD 3-fase (primær, via HA) |
 | Grid-måler fallback | VM-3P75CT via Victron Modbus (mangler L3 på IT-nett) |
@@ -181,7 +139,7 @@ docker compose run --rm victron-trader python optimizer.py
 | BATTERY_MAX_DISCHARGE_KW | 10 | Maks utladefart kW |
 | PEAK_LIMIT_KW | 9.5 | Peak-shaving grense kW |
 | PRICE_AREA | NO1 | Prisområde |
-| MIN_PRICE_DIFF_NOK | 1.10 | Min spread for arbitrasje (basert på Receel 60 000kr / 2000 sykler) |
+| MIN_PRICE_DIFF_NOK | 0.10 | Min spread for arbitrasje (hev til 1.60 etter test) |
 | SITE_LAT | 60.14 | Breddegrad for sol-prognose (Ringerike) |
 | SITE_LON | 10.25 | Lengdegrad for sol-prognose (Ringerike) |
 | SOLAR_MAX_KW | 5.0 | Sol-inverter maks effekt kW (Fronius Primo) |
