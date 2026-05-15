@@ -77,11 +77,28 @@ class EnergyTrader:
         last_keepalive = 0.0
         last_peak_shave = 0.0
         last_price_count = 0
+        last_reconnect_attempt = 0.0
         self._dvcc_charging_stopped = False  # Sporer om vi har satt DVCC 0A
 
         while self.running:
             now = datetime.now(OSLO_TZ)
             current_time = time.time()
+
+            # Reconnect ved Modbus-feil (maks hvert 30s)
+            if not self.victron._connected:
+                if current_time - last_reconnect_attempt >= 30:
+                    last_reconnect_attempt = current_time
+                    logger.warning("Modbus ikke tilkoblet — forsøker reconnect...")
+                    if self.victron.connect():
+                        logger.info("Modbus reconnect OK")
+                        self.victron.set_min_soc(CONFIG.min_soc)
+                    else:
+                        logger.error("Modbus reconnect feilet — venter 30s")
+                        time.sleep(3)
+                        continue
+                else:
+                    time.sleep(3)
+                    continue
 
             if now.hour != last_hour:
                 last_hour = now.hour
@@ -118,7 +135,7 @@ class EnergyTrader:
 
             action_hour = self.current_action.timestamp.astimezone(OSLO_TZ).hour if self.current_action else -1
             if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
-                if current_time - last_keepalive >= 3:
+                if current_time - last_keepalive >= 30:  # Victron krever maks 60s — 30s er trygg margin
                     if self.current_action.action == 'discharge':
                         if current_time - self._action_start_time < 45:
                             self.victron.send_keepalive()
