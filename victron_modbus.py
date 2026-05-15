@@ -404,15 +404,20 @@ class VictronModbus:
         return None
 
     def get_battery_power(self) -> int:
-        """Returnerer batterieffekt i Watt (positiv=lading, negativ=utlading)."""
+        """Returnerer batterieffekt i Watt (positiv=lading, negativ=utlading).
+
+        Merk: reg 842 (com.victronenergy.system /Dc/Battery/Power) returnerer
+        negativ ved lading på Abelgård-systemet (2× MultiPlus-II parallell).
+        Vi inverterer for konsistent konvensjon i resten av koden.
+        """
         try:
             r = self.client.read_holding_registers(
                 address=self.REG_BATTERY_POWER, count=1, device_id=self.UNIT_SYSTEM)
             if r.isError():
                 return 0
             val = r.registers[0]
-            # Håndter signed16 verdier
-            return val - 65536 if val > 32767 else val
+            raw = val - 65536 if val > 32767 else val
+            return -raw  # Inverter: reg 842 negativ=lading → vi vil ha positiv=lading
         except Exception:
             logger.exception("get_battery_power feilet")
             return 0
