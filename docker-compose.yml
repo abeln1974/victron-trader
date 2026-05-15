@@ -5,70 +5,40 @@ services:
     build: .
     container_name: victron-trader
     restart: unless-stopped
-
-    # Network mode for direct access to Victron on LAN
-    # Host network gir enklest tilgang til Cerbo GX på 192.168.1.x
     network_mode: host
-    
-    # Option 2: Bridge network (hvis du vil isolere)
-    # networks:
-    #   - victron-net
-    
     environment:
-      # Victron Modbus-TCP config
       - VICTRON_HOST=${VICTRON_HOST:-192.168.1.60}
       - VICTRON_MODBUS_PORT=${VICTRON_MODBUS_PORT:-502}
       - VICTRON_UNIT_ID=${VICTRON_UNIT_ID:-246}
-      
-      # Market
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
-      
-      # Battery (Abelgard: 4x12kWh Receel NMC refurbished = 42.8kWh netto, 10kW max)
-      # NMC: hold 20-90% for lang levetid (unngå langvarig >90% og <20%)
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-45.6}
       - BATTERY_MAX_CHARGE_KW=${BATTERY_MAX_CHARGE_KW:-10}
       - BATTERY_MAX_DISCHARGE_KW=${BATTERY_MAX_DISCHARGE_KW:-10}
       - BATTERY_EFFICIENCY=${BATTERY_EFFICIENCY:-0.95}
       - MIN_SOC=${MIN_SOC:-20}
       - MAX_SOC=${MAX_SOC:-90}
-      
-      # Strategy
       - MIN_PRICE_DIFF_NOK=${MIN_PRICE_DIFF_NOK:-1.10}
       - FORECAST_HOURS=${FORECAST_HOURS:-24}
-
-      # Sol-prognose (Open-Meteo MET Norway MEPS)
       - SITE_LAT=${SITE_LAT:-60.14}
       - SITE_LON=${SITE_LON:-10.25}
       - SOLAR_MAX_KW=${SOLAR_MAX_KW:-5.0}
       - SOLAR_SYSTEM_EFFICIENCY=${SOLAR_SYSTEM_EFFICIENCY:-0.85}
       - SOLAR_EFFECTIVE_HOURS=${SOLAR_EFFECTIVE_HOURS:-4.0}
-      
-      # Home Assistant - Qubino primærkilde grid (alle 3 faser IT-nett)
       - HA_URL=${HA_URL:-https://homeassistant.abelgaard.no}
       - HA_TOKEN=${HA_TOKEN:-}
       - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
       - HA_MIN_INTERVAL=${HA_MIN_INTERVAL:-30.0}
-
-      # EVCS elbil-lader (1-fase, 6-16A)
       - EVCS_ENTITY_PREFIX=${EVCS_ENTITY_PREFIX:-evcs_hq2309vtvnf}
       - EVCS_MIN_CURRENT_A=${EVCS_MIN_CURRENT_A:-6}
       - EVCS_MAX_CURRENT_A=${EVCS_MAX_CURRENT_A:-16}
       - EVCS_PHASES=${EVCS_PHASES:-1}
       - PEAK_LIMIT_KW=${PEAK_LIMIT_KW:-9.5}
-
-      # Database
       - DB_PATH=/app/data/profit.db
-
-      # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-
     volumes:
-      # Persist database and logs
-      - ./data:/app/data
-      - ./logs:/app/logs
-    
-    # Optional: CPU/memory limits
+      - /opt/victron-trader/data:/app/data
+      - /opt/victron-trader/logs:/app/logs
     deploy:
       resources:
         limits:
@@ -77,7 +47,6 @@ services:
         reservations:
           cpus: '0.25'
           memory: 128M
-    
     logging:
       driver: "json-file"
       options:
@@ -89,11 +58,11 @@ services:
     container_name: victron-web
     restart: unless-stopped
     command: python web.py
-    network_mode: host  # Trenger tilgang til Cerbo GX på 192.168.1.60
+    network_mode: host
     environment:
       - VICTRON_HOST=${VICTRON_HOST:-192.168.1.60}
       - VICTRON_MODBUS_PORT=${VICTRON_MODBUS_PORT:-502}
-      - READONLY_MODE=true          # Kun lesing — ingen skriving til Cerbo GX
+      - READONLY_MODE=true
       - PRICE_AREA=${PRICE_AREA:-NO1}
       - VAT=${VAT:-1.25}
       - BATTERY_CAPACITY_KWH=${BATTERY_CAPACITY_KWH:-45.6}
@@ -116,10 +85,10 @@ services:
       - WEB_PORT=8080
       - DB_PATH=/app/data/profit.db
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-
-# Optional: Bridge network (hvis ikke host network)
-# networks:
-#   victron-net:
-#     driver: bridge
+      - /opt/victron-trader/data:/app/data
+      - /opt/victron-trader/logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
