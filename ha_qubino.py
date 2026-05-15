@@ -249,9 +249,11 @@ class EVCSController:
     # ------------------------------------------------------------------ #
 
     def stop_charging(self, reason: str = "batteri selger") -> bool:
-        """Stopp lading helt."""
+        """Stopp lading helt. Kaller HA kun ved statusendring."""
         if not self.is_connected():
             return True
+        if self._last_current_a == 0:
+            return True  # Allerede stoppet — ikke kall HA eller logg
         logger.info(f"EVCS: stopper elbillading ({reason})")
         ok = self._call("switch", "turn_off",
                         {"entity_id": f"switch.{self._prefix}_ev_charging"})
@@ -365,3 +367,4 @@ if __name__ == "__main__":
     else:
         print("❌ Qubino ikke tilgjengelig")
         print("   Sjekk HA_URL, HA_TOKEN og entity-navn i ha_qubino.py")
+
