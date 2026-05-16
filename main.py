@@ -315,10 +315,12 @@ class EnergyTrader:
             fresh_soc = self.victron.get_soc()
             if fresh_soc is None:
                 fresh_soc = soc
-            self._execute_action(action, fresh_soc, current.price_nok_kwh)
-            # Les energitellere ved start av ny aktiv action (ikke ved idle)
-            if action.action != 'idle' and (prev_action is None or prev_action.action == 'idle'):
+            # Les energitellere og SOC ved start av ny aktiv action (ikke ved idle)
+            is_new_active = action.action != 'idle' and (prev_action is None or prev_action.action == 'idle')
+            if is_new_active:
+                self._action_start_soc = fresh_soc
                 self._action_start_counters = self.victron.get_energy_counters()
+            self._execute_action(action, fresh_soc, current.price_nok_kwh)
             self.current_action = action
             self._save_state()
 
