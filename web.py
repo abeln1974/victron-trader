@@ -149,6 +149,38 @@ def api_live():
         return jsonify(dict(_live_cache))
 
 
+@app.route("/api/activity")
+def api_activity():
+    """Live trader-aktivitet: current_action + live power."""
+    import json, os
+    state_file = "/app/data/trader_state.json"
+    current_action = {"action": "idle", "power_kw": 0.0, "reason": "", "since": None}
+    if os.path.exists(state_file):
+        try:
+            with open(state_file) as f:
+                state = json.load(f)
+            act = state.get("current_action")
+            if act:
+                current_action = {
+                    "action": act.get("action", "idle"),
+                    "power_kw": act.get("power_kw", 0.0),
+                    "reason": act.get("reason", ""),
+                    "since": act.get("timestamp", ""),
+                }
+        except Exception:
+            pass
+    with _live_lock:
+        live = dict(_live_cache)
+    return jsonify({
+        "current_action": current_action,
+        "battery_w": live.get("battery_w", 0),
+        "solar_w": live.get("solar_w", 0),
+        "grid_w": live.get("grid_w", 0),
+        "soc": live.get("soc", 0),
+        "updated": live.get("updated"),
+    })
+
+
 @app.route("/api/plan")
 def api_plan():
     from optimizer import Optimizer
@@ -367,6 +399,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     <div class="card">
       <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">🔄 Siste handler</h2>
+      <div id="liveActivityBanner" style="margin-bottom:.6rem;padding:.4rem .6rem;border-radius:.4rem;font-size:.8rem;display:none"></div>
       <table>
         <thead><tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr></thead>
         <tbody id="tradesTable"><tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr></tbody>
@@ -483,6 +516,40 @@ async function fetchPrices() {
 }
 
 let planChart = null;
+
+async function fetchActivity() {
+  try {
+    const res = await fetch('/api/activity');
+    const d = await res.json();
+    const banner = document.getElementById('liveActivityBanner');
+    const act = d.current_action;
+    const batW = d.battery_w ?? 0;
+    const solW = d.solar_w ?? 0;
+
+    if (act && act.action !== 'idle') {
+      const isCharge = act.action === 'charge';
+      const icon = isCharge ? '🔋' : '⚡';
+      const color = isCharge ? '#3b82f6' : '#f97316';
+      const label = isCharge ? `Lader ${act.power_kw.toFixed(1)}kW` : `Utlader ${act.power_kw.toFixed(1)}kW`;
+      banner.style.display = 'block';
+      banner.style.background = isCharge ? 'rgba(59,130,246,0.15)' : 'rgba(249,115,22,0.15)';
+      banner.style.color = color;
+      banner.style.border = `1px solid ${color}44`;
+      banner.innerHTML = `${icon} <strong>NÅ AKTIV:</strong> ${label} &nbsp;|&nbsp; Batteri ${batW > 0 ? '+' : ''}${Math.round(batW)}W &nbsp;|&nbsp; ${act.reason || ''}`;
+    } else {
+      // Idle — vis hva som skjer live
+      let status = '⏸️ Idle';
+      if (solW > 200 && batW > 100) status = `☀️ Sol ${(solW/1000).toFixed(1)}kW lader batteri (+${Math.round(batW)}W)`;
+      else if (solW > 200) status = `☀️ Sol ${(solW/1000).toFixed(1)}kW — selvforbruk`;
+      else if (batW < -100) status = `🔋 Batteri utlader ${Math.round(Math.abs(batW))}W`;
+      banner.style.display = 'block';
+      banner.style.background = 'rgba(148,163,184,0.1)';
+      banner.style.color = '#94a3b8';
+      banner.style.border = '1px solid #33415544';
+      banner.innerHTML = status;
+    }
+  } catch(e) {}
+}
 
 async function fetchTrades() {
   const res = await fetch('/api/trades');
@@ -658,7 +725,7 @@ let CONFIG_SOLAR_MAX = 5.0;
 fetch('/api/status').then(r=>r.json()).then(d => { CONFIG_SOLAR_MAX = d.solar_max_kw || 5.0; });
 
 async function refresh() {
-  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan(), fetchLive()]);
+  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan(), fetchLive(), fetchActivity()]);
 }
 
 refresh();
