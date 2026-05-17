@@ -90,7 +90,7 @@ class VictronModbus:
         self.port = port
         self.client: Optional[ModbusTcpClient] = None
         self._connected = False
-        # READONLY_MODE=true → les alt, skriv ingenting
+        self._last_setpoint: int = 0
         self.readonly = os.getenv("READONLY_MODE", "false").lower() == "true"
         if self.readonly:
             logger.info("🔒 READONLY_MODE aktiv — ingen skriving til Cerbo GX")
@@ -167,6 +167,9 @@ class VictronModbus:
         """
         if self.readonly:
             logger.warning(f"🔒 READONLY_MODE: blokkerte ESS setpoint {power_watts}W")
+            return False
+        if not self._connected or not self.client:
+            logger.warning("set_grid_setpoint: ikke tilkoblet Modbus")
             return False
         w = int(power_watts)
         # signed16 → uint16 (range -32768 til 32767 W per fase)
@@ -314,10 +317,9 @@ class VictronModbus:
         return False
 
     def stop_ess_control(self) -> bool:
-        """Idle: setpoint=0 men beholder Hub4Mode=3 (trader eier fortsatt).
-        Victron går til Passthru automatisk hvis keepalive stopper (krasj/shutdown)."""
+        """Idle: setpoint=0 men beholder Hub4Mode=3 (trader eier fortsatt)."""
         self._last_setpoint = 0
-        if not self.readonly:
+        if not self.readonly and self._connected and self.client:
             try:
                 self.client.write_register(
                     address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
@@ -328,10 +330,9 @@ class VictronModbus:
         return True
 
     def release_control(self) -> bool:
-        """Gi kontroll tilbake til Victron ESS — kun ved planlagt shutdown.
-        Bytter Hub4Mode → 2 (Optimized) og nullstiller setpoint."""
+        """Gi kontroll tilbake til Victron ESS — kun ved planlagt shutdown."""
         self._last_setpoint = 0
-        if not self.readonly:
+        if not self.readonly and self._connected and self.client:
             try:
                 self.client.write_register(
                     address=self.REG_VEBUS_ESS_SETPOINT_L1, value=0,
