@@ -47,18 +47,20 @@ class ProfitTracker:
         conn.commit()
         conn.close()
 
-    def log_trade(self, action: str, energy_kwh: float, price_nok_kwh: float, 
+    def log_trade(self, action: str, energy_kwh: float, price_nok_kwh: float,
                   efficiency: float = CONFIG.battery_efficiency) -> float:
         """
-        Log a trade and calculate net profit.
-        Buy = negative profit (cost)
-        Sell = positive profit (revenue), minus round-trip efficiency loss
+        Logg handel og beregn netto profitt.
+        Buy  → negativ (kostnad)
+        Sell → positiv kun hvis salgspris > siste kjøpspris (reell arbitrasje)
+        net_profit = (salgspris - siste_kjøpspris) × kWh × effektivitet
         """
         if action == "buy":
             net_profit = -energy_kwh * price_nok_kwh
+            self._last_buy_price = price_nok_kwh
         elif action == "sell":
-            # Account for efficiency loss on discharge
-            net_profit = energy_kwh * price_nok_kwh * efficiency
+            buy_cost = getattr(self, '_last_buy_price', price_nok_kwh)
+            net_profit = energy_kwh * (price_nok_kwh - buy_cost) * efficiency
         else:
             net_profit = 0
 
