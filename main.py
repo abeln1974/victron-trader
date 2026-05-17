@@ -39,6 +39,12 @@ class EnergyTrader:
         self._action_start_time: float = 0.0
         self._last_price_count: int = 0
         self._original_charge_kw: float = 0.0
+        self._action_start_soc: Optional[float] = None
+        self._action_start_counters: Optional[tuple] = None
+        self._last_price_nok: float = 0.0
+        self._solar_cache_kwh: float = 0.0
+        self._solar_cache_time: float = 0.0
+        self._SOLAR_CACHE_TTL: float = 3600.0  # 1 time
 
     def _save_state(self):
         """Lagre current_action til disk så den overlever restart."""
@@ -117,9 +123,6 @@ class EnergyTrader:
         self.victron.set_min_soc(CONFIG.min_soc)
         logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%")
 
-        self._action_start_soc: Optional[float] = None
-        self._action_start_counters: Optional[tuple] = None
-        self._last_price_nok: float = 0.0
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
@@ -203,7 +206,7 @@ class EnergyTrader:
             action_hour = self.current_action.timestamp.astimezone(OSLO_TZ).hour if self.current_action else -1
             if self.current_action and self.current_action.action != 'idle' and action_hour == now.hour:
                 if self.current_action.action == 'discharge':
-                    if current_time - self._action_start_time < 45:
+                    if current_time - self._action_start_time < 15:  # 15s oppstartsvindu (var 45s)
                         time.sleep(3)
                         continue
                     battery_w = self.victron.get_battery_power() or 0
@@ -257,7 +260,7 @@ class EnergyTrader:
                 last_status_min = now.minute
                 self._log_status()
 
-            time.sleep(3)
+            time.sleep(1)  # Maks 1s delay — keepalive worst-case 8+1=9s (Victron timeout ~10s)
 
     def _enforce_max_soc(self):
         """Håndhev max SOC — hold batteriet i float ved >= max_soc.
@@ -330,6 +333,17 @@ class EnergyTrader:
         except Exception:
             logger.exception("Trade cycle feilet")
 
+    def _get_solar_kwh_cached(self) -> float:
+        """Hent sol-prognose for i morgen — cachet i 1 time for å unngå gjentatte API-kall."""
+        now = time.time()
+        if now - self._solar_cache_time < self._SOLAR_CACHE_TTL:
+            return self._solar_cache_kwh
+        val = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon,
+                                     CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
+        self._solar_cache_kwh = val
+        self._solar_cache_time = now
+        return val
+
     def _get_grid_power(self) -> Optional[float]:
         qpower = self.qubino.get_grid_power()
         if qpower:
@@ -349,8 +363,7 @@ class EnergyTrader:
 
             # KRITISK: Kontinuerlig MIN_SOC beskyttelse med storm mode
             # Sjekk storm mode status (samme logikk som optimizer)
-            from solar_forecast import get_solar_kwh_tomorrow
-            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
+            solar_kwh_tomorrow = self._get_solar_kwh_cached()
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             
@@ -416,8 +429,7 @@ class EnergyTrader:
     def _execute_action(self, action: Action, soc: float, price: float):
         if action.action == 'charge':
             # Sjekk storm mode status for MIN_SOC
-            from solar_forecast import get_solar_kwh_tomorrow
-            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
+            solar_kwh_tomorrow = self._get_solar_kwh_cached()
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             mode_str = "STORM" if storm_mode else "NORMAL"
@@ -452,8 +464,7 @@ class EnergyTrader:
 
         elif action.action == 'discharge':
             # Sjekk storm mode status for MIN_SOC
-            from solar_forecast import get_solar_kwh_tomorrow
-            solar_kwh_tomorrow = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon, CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
+            solar_kwh_tomorrow = self._get_solar_kwh_cached()
             storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             
