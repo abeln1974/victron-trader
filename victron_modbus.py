@@ -377,6 +377,8 @@ class VictronModbus:
 
     def get_soc(self) -> Optional[float]:
         """Battery SOC. Register 266, scale /10. (SmartShunt unit 226)"""
+        if not self._connected or not self.client:
+            return None
         try:
             result = self.client.read_holding_registers(
                 address=self.REG_SOC, count=1, device_id=self.UNIT_BATTERY)
@@ -404,24 +406,26 @@ class VictronModbus:
             logger.debug(f"get_energy_counters feilet: {e}")
         return None
 
-    def get_battery_power(self) -> int:
+    def get_battery_power(self) -> Optional[float]:
         """Returnerer batterieffekt i Watt (positiv=lading, negativ=utlading).
 
         Merk: reg 842 (com.victronenergy.system /Dc/Battery/Power) returnerer
         negativ ved lading på Abelgård-systemet (2× MultiPlus-II parallell).
         Vi inverterer for konsistent konvensjon i resten av koden.
         """
+        if not self._connected or not self.client:
+            return None
         try:
             r = self.client.read_holding_registers(
                 address=self.REG_BATTERY_POWER, count=1, device_id=self.UNIT_SYSTEM)
             if r.isError():
-                return 0
+                return None
             val = r.registers[0]
             raw = val - 65536 if val > 32767 else val
-            return -raw  # Inverter: reg 842 negativ=lading → vi vil ha positiv=lading
+            return float(-raw)  # Inverter: reg 842 negativ=lading → vi vil ha positiv=lading
         except Exception:
-            logger.exception("get_battery_power feilet")
-            return 0
+            logger.debug("get_battery_power feilet")
+            return None
 
     def get_grid_power(self) -> Optional[float]:
         """

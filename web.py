@@ -159,20 +159,18 @@ def api_live():
 @app.route("/api/activity")
 def api_activity():
     """Live trader-aktivitet: current_action + live power."""
-    import json, os
-    state_file = "/app/data/trader_state.json"
+    state_file = os.path.join(os.path.dirname(CONFIG.db_path) or ".", "trader_state.json")
     current_action = {"action": "idle", "power_kw": 0.0, "reason": "", "since": None}
     if os.path.exists(state_file):
         try:
             with open(state_file) as f:
                 state = json.load(f)
-            act = state.get("current_action")
-            if act:
+            if state.get("action") and state.get("action") != "idle":
                 current_action = {
-                    "action": act.get("action", "idle"),
-                    "power_kw": act.get("power_kw", 0.0),
-                    "reason": act.get("reason", ""),
-                    "since": act.get("timestamp", ""),
+                    "action": state.get("action", "idle"),
+                    "power_kw": state.get("power_kw", 0.0),
+                    "reason": state.get("reason", ""),
+                    "since": state.get("timestamp", ""),
                 }
         except Exception:
             pass
@@ -637,12 +635,13 @@ async function fetchPlan() {
   const plan = await res.json();
   if (!plan.length) return;
 
-  const now = new Date().getHours() + ':' + String(new Date().getMinutes()).padStart(2,'0');
+  const nowHour = new Date().getHours();
 
   // Oppdater tabell
   const tbody = document.getElementById('planTable');
   tbody.innerHTML = plan.map(a => {
-    const isNow = a.time <= now && now < a.time;
+    const planHour = parseInt(a.time.split(' ')[1]);
+    const isNow = planHour === nowHour;
     const actionInfo = a.action === 'discharge'
       ? { icon: '⚡', cls: 'orange', label: 'Utlad' }
       : a.action === 'charge'
@@ -651,7 +650,7 @@ async function fetchPlan() {
     const profitStr = a.action !== 'idle' && a.profit_nok !== 0
       ? `<span style="font-size:.75rem;color:#64748b"> (${a.profit_nok > 0 ? '+' : ''}${a.profit_nok.toFixed(2)} kr)</span>`
       : '';
-    return `<tr>
+    return `<tr${isNow ? ' style="background:#162032;border-left:2px solid #3b82f6"' : ''}>
       <td style="color:#64748b;font-variant-numeric:tabular-nums">${a.time}</td>
       <td><span class="${actionInfo.cls}">${actionInfo.icon} ${actionInfo.label}</span>${profitStr}</td>
       <td style="color:#e2e8f0">${a.power_kw !== 0 ? Math.abs(a.power_kw).toFixed(1) : '—'}</td>

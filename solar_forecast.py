@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 _last_warning_time: float = 0.0  # Throttle feilmeldinger til maks 1/time
+_solar_kwh_cache: dict = {"value": 0.0, "fetched": 0.0, "lat": None, "lon": None}
 
 
 def _fetch_radiation(lat: float, lon: float) -> dict:
@@ -43,7 +44,15 @@ def get_solar_kwh_tomorrow(lat: float, lon: float,
     panel_peak_kw: Inverter maks effekt (f.eks 5.0 kW Fronius Primo)
     system_efficiency: System-virkningsgrad inkl. panel-temp, kabler, inverter (default 0.85)
     Returnerer 0.0 ved feil (fallback til statisk reserve i optimizer).
+    Resultatet caches i 1 time for å unngå gjentatte API-kall fra optimizer/web.
     """
+    import time as _time
+    now_mono = _time.monotonic()
+    if (now_mono - _solar_kwh_cache["fetched"] < 3600.0 and
+            _solar_kwh_cache["lat"] == lat and
+            _solar_kwh_cache["lon"] == lon):
+        log.debug("Sol-prognose cache-treff: %.1f kWh", _solar_kwh_cache["value"])
+        return _solar_kwh_cache["value"]
     try:
         data = _fetch_radiation(lat, lon)
         times = data["hourly"]["time"]
@@ -66,6 +75,7 @@ def get_solar_kwh_tomorrow(lat: float, lon: float,
 
         log.info("Open-Meteo sol-prognose i morgen: %.1f kWh (%.1f eff. timer)",
                  total_kwh, total_kwh / panel_peak_kw if panel_peak_kw else 0)
+        _solar_kwh_cache.update({"value": total_kwh, "fetched": now_mono, "lat": lat, "lon": lon})
         return total_kwh
 
     except urllib.error.URLError as e:

@@ -54,6 +54,7 @@ class EnergyTrader:
                     "action": self.current_action.action,
                     "power_kw": self.current_action.power_kw,
                     "timestamp": self.current_action.timestamp.isoformat(),
+                    "reason": self.current_action.reason,
                     "action_start_soc": getattr(self, '_action_start_soc', None),
                     "last_price_nok": getattr(self, '_last_price_nok', 0.0),
                 }
@@ -339,7 +340,8 @@ class EnergyTrader:
                 self._action_start_soc = fresh_soc
                 self._action_start_counters = self.victron.get_energy_counters()
                 self._action_start_time = time.time()
-            self._execute_action(action, fresh_soc, current.price_nok_kwh)
+            storm_mode, effective_min_soc = self._get_storm_info()
+            self._execute_action(action, fresh_soc, current.price_nok_kwh, storm_mode, effective_min_soc)
             self.current_action = action
             self._save_state()
 
@@ -348,6 +350,12 @@ class EnergyTrader:
 
         except Exception:
             logger.exception("Trade cycle feilet")
+
+    def _get_storm_info(self) -> tuple:
+        """Returner (storm_mode, effective_min_soc) basert på sol-prognose."""
+        solar_kwh = self._get_solar_kwh_cached()
+        storm = solar_kwh < CONFIG.storm_mode_threshold_kwh
+        return storm, (CONFIG.storm_mode_min_soc if storm else CONFIG.min_soc)
 
     def _get_solar_kwh_cached(self) -> float:
         """Hent sol-prognose for i morgen — cachet i 1 time for å unngå gjentatte API-kall."""
@@ -442,20 +450,18 @@ class EnergyTrader:
         except Exception as e:
             logger.debug(f"Peak-shave feilet: {e}")
 
-    def _execute_action(self, action: Action, soc: float, price: float):
+    def _execute_action(self, action: Action, soc: float, price: float,
+                        storm_mode: bool = False, effective_min_soc: float = None):
+        if effective_min_soc is None:
+            effective_min_soc = CONFIG.min_soc
+        mode_str = "STORM" if storm_mode else "NORMAL"
+
         if action.action == 'charge':
-            # Sjekk storm mode status for MIN_SOC
-            solar_kwh_tomorrow = self._get_solar_kwh_cached()
-            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
-            effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
-            mode_str = "STORM" if storm_mode else "NORMAL"
-            
             logger.info(f"CHARGE CHECK: SOC {soc:.1f}% vs {mode_str} MIN_SOC {effective_min_soc:.1f}% vs MAX_SOC {CONFIG.max_soc:.1f}%")
             if soc >= CONFIG.max_soc:
                 logger.info("SOC ved maks, hopper over lading")
                 self.victron.stop_ess_control()
                 return
-            # Tillat lading når SOC < effective_min_soc - batteriet trenger å lade opp!
             if soc < effective_min_soc:
                 logger.info(f"SOC {soc:.1f}% < {effective_min_soc}% — LADING NØDVENDIG ({mode_str.lower()}vindu)")
 
@@ -474,18 +480,12 @@ class EnergyTrader:
             success = self.victron.set_charge_power(charge_kw)
             if success:
                 self._action_start_soc = soc
-                self._original_charge_kw = charge_kw  # Lagre som fast referanse for peak-shave
+                self._original_charge_kw = charge_kw
                 logger.info(f"Lader {charge_kw:.1f}kW")
                 self.current_action = action
 
         elif action.action == 'discharge':
-            # Sjekk storm mode status for MIN_SOC
-            solar_kwh_tomorrow = self._get_solar_kwh_cached()
-            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
-            effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
-            
             if soc <= effective_min_soc:
-                mode_str = "STORM" if storm_mode else "NORMAL"
                 logger.info(f"SOC ved {mode_str.lower()} min ({effective_min_soc}%), hopper over utlading")
                 self.victron.stop_ess_control()
                 return
