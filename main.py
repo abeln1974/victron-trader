@@ -232,6 +232,7 @@ class EnergyTrader:
             if now.minute % 5 == 0 and now.minute != last_status_min:
                 last_status_min = now.minute
                 self._log_status()
+                self._adjust_active_setpoint()
 
             time.sleep(1)  # Maks 1s delay — keepalive worst-case 8+1=9s (Victron timeout ~10s)
 
@@ -509,6 +510,74 @@ class EnergyTrader:
         grid  = self._get_grid_power()
         solar = self.victron.get_solar_power()
         logger.info(f"Status: SOC={soc}% Grid={grid}W Sol={solar}W")
+
+    def _adjust_active_setpoint(self):
+        """Justerer discharge/charge-effekt midt i timen basert på gjenværende SOC og tid.
+
+        Mål: strekke batteriet nøyaktig til slutten av timen — hverken for mye eller for lite.
+        Kjøres hvert 5. minutt ved aktiv charge/discharge-handling.
+        """
+        if not self.current_action or self.current_action.action not in ('charge', 'discharge'):
+            return
+
+        soc = self.victron.get_soc()
+        if soc is None:
+            return
+
+        now = datetime.now(OSLO_TZ)
+        remaining_min = 60 - now.minute
+        if remaining_min <= 2:
+            return  # Trade cycle kjøres om <2 min — ikke juster
+        remaining_hours = remaining_min / 60.0
+
+        _, effective_min_soc = self._get_storm_info()
+        opt = self.optimizer
+
+        if self.current_action.action == 'discharge':
+            avail_kwh = max(0.0, opt.capacity * (soc - effective_min_soc) / 100 - opt.peak_reserve)
+            if avail_kwh <= 0:
+                logger.info(
+                    f"Setpoint-justering: SOC {soc:.1f}% ved min ({effective_min_soc:.0f}%) — stopper utlading"
+                )
+                self.victron.stop_ess_control()
+                self.current_action = None
+                return
+            optimal_kw = round(min(opt.max_discharge, avail_kwh / remaining_hours), 1)
+            current_kw = abs(self.current_action.power_kw)
+            if abs(optimal_kw - current_kw) >= 0.5:
+                logger.info(
+                    f"Setpoint-justering: utlading {current_kw:.1f}→{optimal_kw:.1f}kW "
+                    f"(SOC {soc:.1f}%, {remaining_min}min igjen, {avail_kwh:.1f}kWh tilgj.)"
+                )
+                self.victron.set_discharge_power(optimal_kw)
+                self.current_action.power_kw = -optimal_kw
+
+        elif self.current_action.action == 'charge':
+            space_kwh = max(0.0, opt.capacity * (CONFIG.max_soc - soc) / 100)
+            if space_kwh <= 0:
+                logger.info(
+                    f"Setpoint-justering: SOC {soc:.1f}% ved maks ({CONFIG.max_soc:.0f}%) — stopper lading"
+                )
+                self.victron.stop_ess_control()
+                self.current_action = None
+                return
+            optimal_kw = round(min(opt.max_charge, space_kwh / remaining_hours), 1)
+            # Respekter peak-limit basert på annen last (ekskl. vår egen lading)
+            grid_w = self._get_grid_power() or 0
+            other_load_kw = max(0.0, grid_w / 1000.0 - (self._original_charge_kw or self.current_action.power_kw))
+            headroom_kw = max(0.0, opt.peak_limit_kw - other_load_kw)
+            optimal_kw = min(optimal_kw, headroom_kw)
+            current_kw = self.current_action.power_kw
+            if optimal_kw < 0.5:
+                logger.info(f"Setpoint-justering: lading blokkert av peak-limit (headroom {headroom_kw:.1f}kW)")
+                return
+            if abs(optimal_kw - current_kw) >= 0.5:
+                logger.info(
+                    f"Setpoint-justering: lading {current_kw:.1f}→{optimal_kw:.1f}kW "
+                    f"(SOC {soc:.1f}%, {remaining_min}min igjen, {space_kwh:.1f}kWh plass)"
+                )
+                self.victron.set_charge_power(optimal_kw)
+                self.current_action.power_kw = optimal_kw
 
     def _signal_handler(self, signum, frame):
         logger.info("Shutdown signal")
