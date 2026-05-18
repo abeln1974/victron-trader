@@ -3,7 +3,7 @@ import os
 import json
 import threading
 from datetime import datetime, timezone
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 from profit_tracker import ProfitTracker
 from price_fetcher import PriceFetcher
@@ -140,6 +140,13 @@ def api_prices():
 def api_trades():
     trades = tracker.get_recent_trades(20)
     return jsonify(trades)
+
+
+@app.route("/api/trades/hourly")
+def api_trades_hourly():
+    """Trades gruppert per time med sum kjøpt/solgt."""
+    hours = request.args.get('hours', 24, type=int)
+    return jsonify(tracker.get_hourly_trades(hours))
 
 
 @app.route("/api/live")
@@ -398,10 +405,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
     <div class="card">
-      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">🔄 Siste handler</h2>
+      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">🔄 Siste handler
+        <span style="float:right;font-size:.75rem">
+          <button onclick="toggleTradeView()" id="tradeViewBtn" style="background:#334155;border:none;color:#94a3b8;padding:.2rem .5rem;border-radius:.3rem;cursor:pointer">Vis per time</button>
+        </span>
+      </h2>
       <div id="liveActivityBanner" style="margin-bottom:.6rem;padding:.4rem .6rem;border-radius:.4rem;font-size:.8rem;display:none"></div>
+      <div id="tradesSummary" style="font-size:.8rem;color:#64748b;margin-bottom:.5rem;padding:.3rem .5rem;background:#0f172a;border-radius:.3rem;display:none"></div>
       <table>
-        <thead><tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr></thead>
+        <thead id="tradesHeader"><tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr></thead>
         <tbody id="tradesTable"><tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr></tbody>
       </table>
     </div>
@@ -551,26 +563,73 @@ async function fetchActivity() {
   } catch(e) {}
 }
 
-async function fetchTrades() {
-  const res = await fetch('/api/trades');
-  const trades = await res.json();
-  const tbody = document.getElementById('tradesTable');
-  if (!trades.length) return;
+let tradeViewMode = 'detailed'; // 'detailed' or 'hourly'
 
-  tbody.innerHTML = trades.map(t => {
-    const typeClass = t.trade_type === 'sell' ? 'orange' : t.trade_type === 'peak_shave' ? 'yellow' : 'blue';
-    const typeLabel = t.trade_type === 'sell' ? '⚡ Solgt' : t.trade_type === 'peak_shave' ? '🔒 Peak' : '🔋 Kjøpt';
-    const priceOre = t.price_nok_kwh > 0 ? (t.price_nok_kwh * 100).toFixed(0) + 'ø spot' : '—';
-    const price = t.net_profit_nok && t.energy_kwh > 0
-      ? (Math.abs(t.net_profit_nok) / t.energy_kwh * 100).toFixed(1) + 'ø netto'
-      : priceOre;
-    return `<tr>
-      <td style="color:#64748b">${t.timestamp ? t.timestamp.substring(11,16) : '—'}</td>
-      <td><span class="${typeClass}">${typeLabel}</span></td>
-      <td>${t.energy_kwh?.toFixed(1) ?? '—'}</td>
-      <td>${price}</td>
-    </tr>`;
-  }).join('');
+function toggleTradeView() {
+  tradeViewMode = tradeViewMode === 'detailed' ? 'hourly' : 'detailed';
+  document.getElementById('tradeViewBtn').textContent = tradeViewMode === 'detailed' ? 'Vis per time' : 'Vis detaljer';
+  fetchTrades();
+}
+
+async function fetchTrades() {
+  const tbody = document.getElementById('tradesTable');
+  const thead = document.getElementById('tradesHeader');
+  const summary = document.getElementById('tradesSummary');
+  
+  if (tradeViewMode === 'hourly') {
+    // Hourly grouped view
+    thead.innerHTML = '<tr><th>Time</th><th>Kjøpt</th><th>Solgt</th><th>Netto</th></tr>';
+    const res = await fetch('/api/trades/hourly?hours=24');
+    const hourly = await res.json();
+    if (!hourly.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:#475569">Ingen handler i dag</td></tr>';
+      summary.style.display = 'none';
+      return;
+    }
+    
+    let totalBought = 0, totalSold = 0, totalProfit = 0;
+    tbody.innerHTML = hourly.map(h => {
+      totalBought += h.bought_kwh;
+      totalSold += h.sold_kwh;
+      totalProfit += h.net_profit_nok;
+      const hourLabel = h.hour.substring(11, 13) + ':00';
+      const netClass = h.net_profit_nok >= 0 ? 'green' : 'red';
+      return `<tr>
+        <td style="color:#64748b">${hourLabel}</td>
+        <td style="color:#60a5fa">${h.bought_kwh > 0 ? '+' + h.bought_kwh.toFixed(1) : '—'}</td>
+        <td style="color:#fb923c">${h.sold_kwh > 0 ? '-' + h.sold_kwh.toFixed(1) : '—'}</td>
+        <td style="color:${h.net_profit_nok >= 0 ? '#22c55e' : '#ef4444'}">${h.net_profit_nok >= 0 ? '+' : ''}${h.net_profit_nok.toFixed(2)} kr</td>
+      </tr>`;
+    }).join('');
+    
+    summary.innerHTML = `📊 Totalt: <span style="color:#60a5fa">+${totalBought.toFixed(1)} kWh</span> kjøpt, <span style="color:#fb923c">-${totalSold.toFixed(1)} kWh</span> solgt = <span style="color:${totalProfit >= 0 ? '#22c55e' : '#ef4444'}">${totalProfit >= 0 ? '+' : ''}${totalProfit.toFixed(2)} kr</span>`;
+    summary.style.display = 'block';
+  } else {
+    // Detailed view
+    thead.innerHTML = '<tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr>';
+    summary.style.display = 'none';
+    const res = await fetch('/api/trades');
+    const trades = await res.json();
+    if (!trades.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = trades.map(t => {
+      const typeClass = t.trade_type === 'sell' ? 'orange' : t.trade_type === 'peak_shave' ? 'yellow' : 'blue';
+      const typeLabel = t.trade_type === 'sell' ? '⚡ Solgt' : t.trade_type === 'peak_shave' ? '🔒 Peak' : '🔋 Kjøpt';
+      const priceOre = t.price_nok_kwh > 0 ? (t.price_nok_kwh * 100).toFixed(0) + 'ø spot' : '—';
+      const price = t.net_profit_nok && t.energy_kwh > 0
+        ? (Math.abs(t.net_profit_nok) / t.energy_kwh * 100).toFixed(1) + 'ø netto'
+        : priceOre;
+      return `<tr>
+        <td style="color:#64748b">${t.timestamp ? t.timestamp.substring(11,16) : '—'}</td>
+        <td><span class="${typeClass}">${typeLabel}</span></td>
+        <td>${t.energy_kwh?.toFixed(1) ?? '—'}</td>
+        <td>${price}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 async function fetchPlan() {

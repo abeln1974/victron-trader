@@ -147,6 +147,36 @@ class ProfitTracker:
             for row in rows
         ]
 
+    def get_hourly_trades(self, hours: int = 24) -> list:
+        """Hent trades gruppert per time med sum kjøpt/solgt."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute(
+            """SELECT 
+                strftime('%Y-%m-%d %H:00', timestamp) as hour,
+                SUM(CASE WHEN action = 'buy' THEN energy_kwh ELSE 0 END) as bought_kwh,
+                SUM(CASE WHEN action = 'sell' THEN energy_kwh ELSE 0 END) as sold_kwh,
+                SUM(CASE WHEN action = 'buy' THEN 1 ELSE 0 END) as buy_count,
+                SUM(CASE WHEN action = 'sell' THEN 1 ELSE 0 END) as sell_count,
+                SUM(net_profit_nok) as net_profit
+            FROM trades 
+            WHERE datetime(timestamp) > datetime('now', '-{} hours')
+            GROUP BY hour 
+            ORDER BY hour DESC""".format(hours)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [
+            {
+                "hour": row[0],
+                "bought_kwh": round(row[1] or 0, 2),
+                "sold_kwh": round(row[2] or 0, 2),
+                "buy_count": int(row[3] or 0),
+                "sell_count": int(row[4] or 0),
+                "net_profit_nok": round(row[5] or 0, 2),
+            }
+            for row in rows
+        ]
+
 
 if __name__ == "__main__":
     tracker = ProfitTracker()
