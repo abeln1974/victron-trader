@@ -122,6 +122,7 @@ def api_status():
         },
         "capacity_charge_nok": CAPACITY_CHARGE_NOK,
         "solar_max_kw": CONFIG.solar_max_kw,
+        "min_spread_ore": int(CONFIG.min_price_diff_nok * 100),
     })
 
 
@@ -436,15 +437,16 @@ async function fetchStatus() {
   sellEl.textContent = d.price.sell_ore + ' øre';
 
   const margin = d.price.discharge_margin_ore;
+  const minSpread = d.min_spread_ore || 110;
   const marginEl = document.getElementById('marginOre');
   const marginStatus = document.getElementById('marginStatus');
   marginEl.textContent = (margin >= 0 ? '+' : '') + margin + ' øre';
-  marginEl.className = 'card-value ' + (margin >= 10 ? 'green' : margin >= 0 ? 'yellow' : 'red');
+  marginEl.className = 'card-value ' + (margin >= minSpread ? 'green' : margin >= 0 ? 'yellow' : 'red');
 
-  if (margin >= 10) {
+  if (margin >= minSpread) {
     marginStatus.innerHTML = '<span class="badge badge-green">⚡ Lønnsomt å utlade</span>';
   } else if (margin >= 0) {
-    marginStatus.innerHTML = '<span class="badge badge-yellow">⚠ Marginal</span>';
+    marginStatus.innerHTML = `<span class="badge badge-yellow">⚠ Under terskel (${minSpread}ø)</span>`;
   } else {
     marginStatus.innerHTML = '<span class="badge badge-red">🔋 Lønnsomt å lade</span>';
   }
@@ -455,7 +457,7 @@ async function fetchStatus() {
   document.getElementById('todaySold').textContent = d.profit.today_sold_kwh + ' kWh';
 
   const dm = d.price.discharge_margin_ore;
-  const dmColor = dm >= 10 ? '#22c55e' : dm >= 0 ? '#facc15' : '#60a5fa';
+  const dmColor = dm >= minSpread ? '#22c55e' : dm >= 0 ? '#facc15' : '#60a5fa';
   document.getElementById('statusBar').innerHTML =
     `<strong>Status:</strong> Live &nbsp;|&nbsp;
      <strong>Spot:</strong> ${d.price.spot_ore} øre &nbsp;|&nbsp;
