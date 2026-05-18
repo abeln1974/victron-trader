@@ -162,8 +162,7 @@ class Optimizer:
                 power = min(self.max_discharge, avail_kwh)
                 if power > 0:
                     s_ore = sell_ore(p)
-                    savings = buy_ore - s_ore
-                    profit = power * savings / 100
+                    profit = power * (s_ore - buy_ore) / 100
                     reason = f'Topp #{list(profitable_hours).index(i)+1}: {buy_ore:.0f}o (salg {s_ore:.0f}o)'
                     if storm_mode:
                         reason += f' [STORM: floor {effective_min_soc:.0f}%]'
@@ -205,8 +204,15 @@ class Optimizer:
                 ))
                 continue
 
-            # IDLE
-            actions.append(Action(timestamp=p.timestamp, action='idle', power_kw=0.0))
+            # IDLE — legg til forklaring for enklere debugging
+            if i in profitable_hours:
+                idle_reason = f'Lønnsom time men SOC {soc:.0f}% ved min ({effective_min_soc:.0f}%)'
+            elif is_night:
+                idle_reason = f'Natt: SOC {soc:.0f}% ≥ lademål {charge_target_soc:.0f}%'
+            else:
+                spread = sell_ore(p) - buy_ore
+                idle_reason = f'Spread {spread:.0f}ø < {CONFIG.min_price_diff_nok * 100:.0f}ø terskel'
+            actions.append(Action(timestamp=p.timestamp, action='idle', power_kw=0.0, reason=idle_reason))
 
         return actions
 

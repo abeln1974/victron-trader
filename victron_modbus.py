@@ -187,7 +187,7 @@ class VictronModbus:
                 return False
             self._last_setpoint = w
             action = "import" if w > 0 else "export" if w < 0 else "idle"
-            logger.info(f"ESS setpoint (reg37 VE.Bus): {w}W ({action})")
+            logger.debug(f"ESS setpoint (reg37 VE.Bus): {w}W ({action})")
             return True
         except Exception as e:
             logger.exception("set_grid_setpoint feilet")
