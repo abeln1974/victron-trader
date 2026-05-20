@@ -175,9 +175,8 @@ class Optimizer:
                     soc = max(soc - soc_change, effective_min_soc)
                     continue
 
-            # LAD: Kun i de planlagte billige natte-timene
-            # Cap charge_kw slik at grid ikke overstiger peak_limit_kw
-            if i in charge_hours and soc < self.max_soc and is_night and not sol_lader:
+            # LAD: Kun i de planlagte billige natte-timene, opp til charge_target_soc
+            if i in charge_hours and soc < charge_target_soc and is_night and not sol_lader:
                 avail_kwh = self.capacity * (self.max_soc - soc) / 100
                 power = min(self.max_charge, avail_kwh)
                 # Peak-limit-koordinering: begrens lading til hva peak-grensen tillater
@@ -194,6 +193,25 @@ class Optimizer:
                     ))
                     soc_change = (power * self.efficiency / self.capacity) * 100
                     soc = min(soc + soc_change, self.max_soc)
+                    continue
+
+            # KVELDSUTLADING: Gjør plass til sol — utlad ned til charge_target_soc
+            # Kjøres kl 20-22 hvis SOC > charge_target_soc og sol-prognose er god
+            if (not storm_mode and 20 <= local_hour < 22
+                    and soc > charge_target_soc + 2.0
+                    and solar_reserve_pct > 5.0):
+                avail_kwh = self.capacity * (soc - charge_target_soc) / 100
+                power = min(self.max_discharge, avail_kwh)
+                if power > 0:
+                    reason = (f'Kveldsutlading: gjør plass til sol '
+                              f'(SOC {soc:.0f}%→{charge_target_soc:.0f}%, sol-reserve {solar_reserve_pct:.0f}%)')
+                    actions.append(Action(
+                        timestamp=p.timestamp, action='discharge',
+                        power_kw=-power, expected_profit_nok=0.0,
+                        reason=reason
+                    ))
+                    soc_change = (power / self.efficiency / self.capacity) * 100
+                    soc = max(soc - soc_change, charge_target_soc)
                     continue
 
             # SOL LADER: La Fronius gjore jobben
