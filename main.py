@@ -272,25 +272,24 @@ class EnergyTrader:
             logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh [{kwh_source}] (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
 
     def _enforce_max_soc(self):
-        """Håndhev max SOC — hold batteriet i float ved >= max_soc.
+        """Håndhev max SOC.
 
-        AC-koblet Fronius påvirkes ikke av DVCC. Riktig løsning er å sikre at
-        trader ikke aktivt lader når SOC >= max_soc, og ellers la Mode 2 flyte:
-        - Fronius dekker husforbruk direkte
-        - Overskudd eksporteres naturlig via Victron ESS
-        - Batteriet synker sakte av husforbruk til under 89%
-        Kjøres hvert 10s fra peak-shave-sløyfen.
+        Ved SOC >= max_soc: DVCC max charge current = 0A — stopper MultiPlus fra å ta
+        inn Fronius-overskudd. Fronius-overskudd eksporteres da til nett automatisk.
+        Ved SOC < max_soc - 1%: frigjør DVCC (-1 = ingen grense).
         """
         soc = self.victron.get_soc()
         if soc is None:
             return
 
         if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — float: setpoint=0, Mode 3 beholdes (NMC-vern)")
-            self.victron.stop_ess_control()  # setpoint → 0, Mode 3 beholdes
+            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — DVCC=0A, Fronius-overskudd eksporteres")
+            self.victron.stop_ess_control()           # setpoint=0, Mode 3 beholdes
+            self.victron.set_max_charge_current(0)    # Stopper MultiPlus fra å lade
             self._dvcc_charging_stopped = True
         elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — lading tillatt igjen")
+            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — DVCC frigjort, lading tillatt igjen")
+            self.victron.set_max_charge_current(-1)   # Ingen grense
             self._dvcc_charging_stopped = False
 
     def _execute_trade_cycle(self):
