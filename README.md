@@ -39,7 +39,7 @@ Trader eier Victron **alltid** via Mode 3 (ekstern kontroll):
 - **Oppstart** → Hub4Mode=3, setpoint=0, DVCC frigjort
 - **Idle** → setpoint=0, keepalive 8s (Mode 3 holdes)
 - **Natt-lading** → setpoint=+kW, lader til `90% - sol_reserve_pct`
-- **Kveldsutlading** → utlader ned til lademål kl 20-22 for å gjøre plass til sol
+- **Sol-reserve utlading** → utlader 2 kW hele dagen (06-22) ned til lademål hvis SOC > lademål + 2% og sol-prognose tilsier det
 - **Dag-utlading** → setpoint=-kW ved lønnsom spot (terskkel 1.10 kr)
 - **Peak-shaving** → utlader ved grid > 9.5 kW, hvert 10s
 - **SOC ≥ 90%** → DVCC=0A (stopper Fronius-overskudd fra å lade batteriet), eksport til nett
@@ -55,9 +55,16 @@ charge_target_soc = max_soc - solar_reserve_pct
 ```
 Eksempel: prognose 11 kWh → reserve 24.6% → lademål 65.4% SOC
 
-**Kveldsutlading (kl 20-22):** Hvis SOC > lademål + 2% → utlad ned til lademål. Sol fyller opp neste dag.
+**Kontinuerlig sol-reserve utlading (hele dagen 06-22):**
+Hvis SOC > lademål + 2% utlader systemet sakte (2 kW) gjennom hele dagen — ikke bare om kvelden. 2 kW er valgt for å beholde 8 kW kapasitet til peak-shaving. Systemet stopper automatisk ved lademålet. Sol fyller opp resten på dagtid.
 
-**Storm mode:** Hvis prognose < 10 kWh → MIN_SOC heves fra 35% til 45% (30t nødstrøm), lades til 90%.
+Eksempel med prognose 11 kWh (reserve 24.6%):
+- Lademål: 65.4% SOC
+- Kl 08: SOC=85% → utlader 2 kW → ~1.4% per time
+- Kl 14: SOC≈65% → stopper
+- Sol fyller fra 65% → 90% på ettermiddagen
+
+**Storm mode:** Hvis prognose < 10 kWh → MIN_SOC heves fra 35% til 45% (30t nødstrøm), lades til 90%, ingen sol-reserve utlading.
 
 ## Peak-shaving
 
