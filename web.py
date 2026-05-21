@@ -210,589 +210,782 @@ def dashboard():
     return render_template_string(DASHBOARD_HTML)
 
 
-DASHBOARD_HTML = """<!DOCTYPE html>
+DASHBOARD_HTML = """
+<!DOCTYPE html>
 <html lang="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Abelgård Energihandel</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<title>Abelgård Energi</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-  header {
-    background: linear-gradient(135deg, #1e3a5f, #0f2027);
-    padding: 1.2rem 2rem;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    border-bottom: 1px solid #1e40af44;
-  }
-  header h1 { font-size: 1.4rem; font-weight: 700; color: #60a5fa; }
-  header span { font-size: 0.85rem; color: #94a3b8; }
-  .live-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e;
-    animation: pulse 1.5s infinite; margin-left: auto; }
-  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+:root {
+  --bg: #050d1a;
+  --panel: rgba(10,25,47,0.85);
+  --border: rgba(0,180,255,0.15);
+  --accent: #00b4ff;
+  --solar: #f59e0b;
+  --grid-col: #60a5fa;
+  --bat: #22c55e;
+  --red: #ef4444;
+  --text: #e2f0ff;
+  --muted: #4a6080;
+}
 
-  main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+body {
+  font-family: 'Rajdhani', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
 
-  .grid { display: grid; gap: 1rem; }
-  .grid-4 { grid-template-columns: repeat(4, 1fr); }
-  .grid-2 { grid-template-columns: repeat(2, 1fr); }
-  @media(max-width:900px) { .grid-4,.grid-2 { grid-template-columns: 1fr 1fr; } }
-  @media(max-width:500px) { .grid-4,.grid-2 { grid-template-columns: 1fr; } }
+/* ── SKY SCENE ── */
+.sky {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  background: linear-gradient(180deg, #020a18 0%, #0a1e3d 40%, #1a3a6b 70%, #0d2442 100%);
+  overflow: hidden;
+}
 
-  .card {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    padding: 1.2rem 1.5rem;
-  }
-  .card-title { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem; }
-  .card-value { font-size: 2rem; font-weight: 700; }
-  .card-sub { font-size: 0.8rem; color: #64748b; margin-top: .3rem; }
+/* Stars */
+.sky::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 10% 20%, rgba(255,255,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 25% 8%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 40% 15%, rgba(255,255,255,0.9) 0%, transparent 100%),
+    radial-gradient(1px 1px at 60% 5%, rgba(255,255,255,0.7) 0%, transparent 100%),
+    radial-gradient(1px 1px at 75% 18%, rgba(255,255,255,0.5) 0%, transparent 100%),
+    radial-gradient(1px 1px at 88% 12%, rgba(255,255,255,0.8) 0%, transparent 100%),
+    radial-gradient(1px 1px at 15% 35%, rgba(255,255,255,0.4) 0%, transparent 100%),
+    radial-gradient(1px 1px at 50% 28%, rgba(255,255,255,0.6) 0%, transparent 100%),
+    radial-gradient(1px 1px at 82% 30%, rgba(255,255,255,0.5) 0%, transparent 100%);
+}
 
-  .green { color: #22c55e; }
-  .red { color: #ef4444; }
-  .blue { color: #60a5fa; }
-  .yellow { color: #facc15; }
-  .orange { color: #fb923c; }
+/* Sol-bue SVG */
+.sun-arc-wrap {
+  position: absolute;
+  width: 100%; height: 100%;
+  top: 0; left: 0;
+}
 
-  .badge {
-    display: inline-block; padding: .2rem .7rem; border-radius: 9999px;
-    font-size: 0.75rem; font-weight: 600;
-  }
-  .badge-green { background: #14532d; color: #22c55e; }
-  .badge-red { background: #450a0a; color: #ef4444; }
-  .badge-blue { background: #1e3a5f; color: #60a5fa; }
-  .badge-yellow { background: #422006; color: #facc15; }
+#sunArcSvg {
+  width: 100%; height: 100%;
+}
 
-  .chart-card { padding: 1.5rem; }
-  .chart-card h2 { font-size: 0.9rem; color: #94a3b8; margin-bottom: 1rem; }
-  canvas { max-height: 220px; }
+/* Sol-orb */
+.sun-orb {
+  position: absolute;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff9c4 0%, #fbbf24 40%, #f59e0b 70%, transparent 100%);
+  box-shadow: 0 0 30px 15px rgba(251,191,36,0.5), 0 0 60px 30px rgba(251,191,36,0.2);
+  transform: translate(-50%, -50%);
+  transition: left 1s ease, top 1s ease;
+}
 
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  th { text-align: left; padding: .5rem .8rem; color: #64748b; font-weight: 500; border-bottom: 1px solid #334155; }
-  td { padding: .5rem .8rem; border-bottom: 1px solid #1e293b; }
-  tr:hover td { background: #263348; }
+/* Horizon / ground */
+.horizon {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 60px;
+  background: linear-gradient(180deg, transparent 0%, rgba(0,20,50,0.8) 100%);
+}
 
-  #lastUpdate { font-size: 0.75rem; color: #475569; text-align: right; margin-top: .5rem; }
+/* Sunrise/sunset labels */
+.sun-time {
+  position: absolute;
+  bottom: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.5);
+}
+.sun-time.rise { left: 8%; }
+.sun-time.noon { left: 50%; transform: translateX(-50%); color: rgba(251,191,36,0.7); }
+.sun-time.set  { right: 8%; }
 
-  .status-bar {
-    background: #1e293b; border: 1px solid #334155; border-radius: 8px;
-    padding: .6rem 1rem; margin-bottom: 1rem;
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-    font-size: 0.82rem; color: #94a3b8;
-  }
-  .status-bar strong { color: #e2e8f0; }
+/* Header overlay */
+.header-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.header-overlay h1 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0,180,255,0.8);
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+  animation: pulse 1.5s infinite;
+  margin-left: auto;
+}
+@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 6px #22c55e;} 50%{opacity:0.4;box-shadow:0 0 2px #22c55e;} }
+
+.action-badge {
+  display: inline-block;
+  padding: 0.2rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid;
+}
+
+/* ── ENERGY FLOW SCENE ── */
+.flow-scene {
+  position: relative;
+  background: linear-gradient(180deg, #0d2442 0%, #050d1a 100%);
+  padding: 0.5rem 1.5rem 1rem;
+}
+
+.flow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.flow-node {
+  text-align: center;
+  flex: 1;
+}
+
+.flow-icon {
+  font-size: 2.2rem;
+  margin-bottom: 0.3rem;
+  display: block;
+}
+
+.flow-label {
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.flow-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0.15rem 0;
+}
+
+/* Animated flow arrow */
+.flow-arrow {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  position: relative;
+  width: 60px;
+}
+
+.arrow-line {
+  height: 2px;
+  width: 100%;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+  background: rgba(255,255,255,0.08);
+}
+
+.arrow-line::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 50%;
+  height: 100%;
+  border-radius: 2px;
+  animation: flow-anim 1.2s linear infinite;
+}
+
+.arrow-line.active-right::after {
+  animation: flow-right 1.2s linear infinite;
+}
+.arrow-line.active-left::after {
+  animation: flow-left 1.2s linear infinite;
+}
+
+@keyframes flow-right {
+  0%  { left: -50%; }
+  100%{ left: 100%; }
+}
+@keyframes flow-left {
+  0%  { left: 100%; }
+  100%{ left: -50%; }
+}
+
+.arrow-w {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── BATTERY VISUAL ── */
+.battery-visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 1;
+}
+
+.bat-shell {
+  width: 52px;
+  height: 80px;
+  border: 2px solid rgba(34,197,94,0.6);
+  border-radius: 6px;
+  position: relative;
+  background: rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+
+.bat-nub {
+  width: 18px; height: 5px;
+  background: rgba(34,197,94,0.6);
+  border-radius: 2px 2px 0 0;
+  margin: 0 auto;
+  position: relative; top: -5px;
+}
+
+.bat-fill {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: linear-gradient(180deg, #16a34a 0%, #22c55e 100%);
+  transition: height 1s ease;
+  box-shadow: 0 -4px 12px rgba(34,197,94,0.4);
+}
+
+.bat-pct {
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  z-index: 2;
+}
+
+/* ── CARDS ── */
+.cards-section {
+  padding: 0.75rem 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+@media(min-width: 600px) {
+  .cards-section { grid-template-columns: repeat(4, 1fr); }
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem 0.9rem;
+  backdrop-filter: blur(8px);
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--card-accent, var(--accent));
+  opacity: 0.6;
+}
+
+.card-icon { font-size: 1.2rem; margin-bottom: 0.3rem; display: block; }
+.card-label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.card-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin: 0.15rem 0 0.1rem;
+  line-height: 1;
+}
+.card-sub { font-size: 0.65rem; color: var(--muted); }
+
+/* ── PRICE STRIP ── */
+.price-strip {
+  padding: 0.75rem 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.price-strip h2 {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.price-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 60px;
+}
+
+.price-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 2px;
+}
+
+.price-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  min-height: 3px;
+  transition: height 0.5s ease;
+}
+
+.price-bar-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.5rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.price-bar-now {
+  background: var(--accent) !important;
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* ── TRADE LOG ── */
+.trade-section {
+  padding: 0.5rem 1.5rem 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.trade-section h2 {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.trade-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 0.78rem;
+}
+
+.trade-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.trade-time { font-family: 'JetBrains Mono', monospace; color: var(--muted); font-size: 0.7rem; min-width: 38px; }
+.trade-type { font-weight: 600; min-width: 42px; }
+.trade-kwh { font-family: 'JetBrains Mono', monospace; color: var(--muted); margin-left: auto; font-size: 0.7rem; }
+.trade-profit { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; min-width: 60px; text-align: right; }
+
+.update-line {
+  font-size: 0.62rem;
+  color: var(--muted);
+  text-align: right;
+  padding: 0.3rem 1.5rem 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
 </style>
 </head>
 <body>
-<header>
-  <div>⚡</div>
-  <div>
-    <h1>Abelgård Energihandel</h1>
-    <span>Kraftriket Solstrøm · Føie AS NO1 · 50 kWh NMC</span>
+
+<!-- SKY SCENE -->
+<div class="sky" id="skyScene">
+  <div class="sun-arc-wrap">
+    <svg id="sunArcSvg" viewBox="0 0 100 40" preserveAspectRatio="none">
+      <path id="arcPath" d="M5,38 Q50,-5 95,38"
+        fill="none" stroke="rgba(251,191,36,0.25)" stroke-width="0.4"
+        stroke-dasharray="1,1"/>
+    </svg>
   </div>
-  <div class="live-dot" title="Live oppdatering hvert 10s"></div>
-</header>
+  <div class="sun-orb" id="sunOrb"></div>
+  <div class="horizon"></div>
+  <span class="sun-time rise" id="labelRise">05:07</span>
+  <span class="sun-time noon">12:00</span>
+  <span class="sun-time set" id="labelSet">21:15</span>
 
-<main>
-  <div class="status-bar" id="statusBar">Laster data...</div>
-
-  <!-- KPI-kort -->
-  <div class="grid grid-4" style="margin-bottom:1rem">
-    <div class="card">
-      <div class="card-title">Spot akkurat nå</div>
-      <div class="card-value blue" id="spotOre">—</div>
-      <div class="card-sub">øre/kWh eks mva</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Reell kjøpspris</div>
-      <div class="card-value" id="buyOre">—</div>
-      <div class="card-sub" id="buyOreSub">øre/kWh inkl alt + Norgespris</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Salgspris (plusskunde)</div>
-      <div class="card-value green" id="sellOre">—</div>
-      <div class="card-sub">øre/kWh (Kraftriket netto)</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Utlade-margin</div>
-      <div class="card-value" id="marginOre">—</div>
-      <div class="card-sub" id="marginStatus">—</div>
-    </div>
+  <div class="header-overlay">
+    <h1>⚡ ABELGÅRD</h1>
+    <span class="action-badge" id="actionBadge" style="border-color:#60a5fa;color:#60a5fa;">IDLE</span>
+    <div class="live-dot"></div>
   </div>
+</div>
 
-  <!-- Live Cerbo GX-data -->
-  <div class="grid grid-4" style="margin-bottom:1rem" id="cerboSection">
-    <div class="card">
-      <div class="card-title">🔋 Batteri SOC</div>
-      <div class="card-value" id="liveSoc">—</div>
-      <div class="card-sub" id="liveSocBar" style="margin-top:.5rem">
-        <div style="background:#1e3a5f;border-radius:4px;height:6px;overflow:hidden">
-          <div id="socBarFill" style="height:100%;background:#22c55e;width:0%;transition:width .5s"></div>
-        </div>
+<!-- ENERGY FLOW -->
+<div class="flow-scene">
+  <div class="flow-row">
+
+    <!-- Grid -->
+    <div class="flow-node">
+      <span class="flow-icon">🔌</span>
+      <div class="flow-label">Grid</div>
+      <div class="flow-value" id="gridW" style="color:var(--grid-col)">— W</div>
+    </div>
+
+    <!-- Arrow grid→hus -->
+    <div class="flow-arrow">
+      <div class="arrow-line" id="arrowGrid" style="--c:#60a5fa;"></div>
+      <div class="arrow-w" id="arrowGridW"></div>
+    </div>
+
+    <!-- Hus -->
+    <div class="flow-node">
+      <span class="flow-icon">🏠</span>
+      <div class="flow-label">Forbruk</div>
+      <div class="flow-value" id="loadW" style="color:#e2e8f0">— W</div>
+    </div>
+
+    <!-- Arrow sol→hus -->
+    <div class="flow-arrow">
+      <div class="arrow-line" id="arrowSolar" style="--c:#f59e0b;"></div>
+      <div class="arrow-w" id="arrowSolarW"></div>
+    </div>
+
+    <!-- Sol -->
+    <div class="flow-node">
+      <span class="flow-icon">☀️</span>
+      <div class="flow-label">Sol</div>
+      <div class="flow-value" id="solarW" style="color:var(--solar)">— W</div>
+    </div>
+
+    <!-- Arrow bat -->
+    <div class="flow-arrow">
+      <div class="arrow-line" id="arrowBat" style="--c:#22c55e;"></div>
+      <div class="arrow-w" id="arrowBatW"></div>
+    </div>
+
+    <!-- Batteri -->
+    <div class="flow-node battery-visual">
+      <div class="bat-nub"></div>
+      <div class="bat-shell">
+        <div class="bat-fill" id="batFill" style="height:0%"></div>
+        <div class="bat-pct" id="batPct">—%</div>
       </div>
+      <div class="flow-label" style="margin-top:0.3rem">Batteri</div>
+      <div class="flow-value" id="batW" style="color:var(--bat);font-size:0.85rem">— W</div>
     </div>
-    <div class="card">
-      <div class="card-title">⚡ Nett</div>
-      <div class="card-value" id="liveGrid">—</div>
-      <div class="card-sub" id="liveGridSub" style="line-height:1.6">
-        <span id="liveGridDir"></span> <span id="liveGridBadge"></span><br>
-        <span id="liveGridPhases" style="font-size:.72rem;color:#475569"></span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">☀️ Sol (Fronius 5kW)</div>
-      <div class="card-value yellow" id="liveSolar">—</div>
-      <div class="card-sub" id="liveSolarSub">W produksjon</div>
-    </div>
-    <div class="card">
-      <div class="card-title">🔌 Batteri effekt</div>
-      <div class="card-value" id="liveBattery">—</div>
-      <div class="card-sub" id="liveBatterySub">W (+ = lader)</div>
-    </div>
-  </div>
 
-  <!-- Profitt-kort -->
-  <div class="grid grid-4" style="margin-bottom:1rem">
-    <div class="card">
-      <div class="card-title">Dagens profitt</div>
-      <div class="card-value green" id="todayProfit">—</div>
-      <div class="card-sub">kr hittil i dag</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Total profitt</div>
-      <div class="card-value green" id="totalProfit">—</div>
-      <div class="card-sub">kr siden oppstart</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Kjøpt i dag</div>
-      <div class="card-value blue" id="todayBought">—</div>
-      <div class="card-sub">kWh lastet inn</div>
-    </div>
-    <div class="card">
-      <div class="card-title">Solgt i dag</div>
-      <div class="card-value orange" id="todaySold">—</div>
-      <div class="card-sub">kWh sendt ut</div>
-    </div>
   </div>
+</div>
 
-  <!-- Graf + handelsplan -->
-  <div class="grid grid-2" style="margin-bottom:1rem">
-    <div class="card chart-card">
-      <h2>Priser neste 24 timer</h2>
-      <canvas id="priceChart"></canvas>
-    </div>
-    <div class="card chart-card">
-      <h2>Handelsplan (smart topp-optimering)</h2>
-      <canvas id="planChart"></canvas>
-    </div>
+<!-- STATS CARDS -->
+<div class="cards-section">
+  <div class="card" style="--card-accent:var(--solar)">
+    <span class="card-icon">🌤️</span>
+    <div class="card-label">Sol i dag</div>
+    <div class="card-val" id="cardSolarToday">— kWh</div>
+    <div class="card-sub" id="cardSolarForecast">prognose i morgen: —</div>
   </div>
-
-  <!-- Handlingsplan tabell + siste handler -->
-  <div class="grid grid-2">
-    <div class="card">
-      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">📋 24-timers plan</h2>
-      <div style="max-height:280px;overflow-y:auto">
-        <table>
-          <thead><tr><th>Tid</th><th>Handling</th><th>kW</th><th>Begrunnelse</th></tr></thead>
-          <tbody id="planTable"><tr><td colspan="4" style="color:#475569">Laster plan...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="card">
-      <h2 style="font-size:.9rem;color:#94a3b8;margin-bottom:.8rem">🔄 Siste handler
-        <span style="float:right;font-size:.75rem">
-          <button onclick="toggleTradeView()" id="tradeViewBtn" style="background:#334155;border:none;color:#94a3b8;padding:.2rem .5rem;border-radius:.3rem;cursor:pointer">Vis per time</button>
-        </span>
-      </h2>
-      <div id="liveActivityBanner" style="margin-bottom:.6rem;padding:.4rem .6rem;border-radius:.4rem;font-size:.8rem;display:none"></div>
-      <div id="tradesSummary" style="font-size:.8rem;color:#64748b;margin-bottom:.5rem;padding:.3rem .5rem;background:#0f172a;border-radius:.3rem;display:none"></div>
-      <table>
-        <thead id="tradesHeader"><tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr></thead>
-        <tbody id="tradesTable"><tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr></tbody>
-      </table>
-    </div>
+  <div class="card" style="--card-accent:var(--bat)">
+    <span class="card-icon">🔋</span>
+    <div class="card-label">Batteri</div>
+    <div class="card-val" id="cardBatPct">—%</div>
+    <div class="card-sub" id="cardBatSub">— W</div>
   </div>
+  <div class="card" style="--card-accent:#a78bfa">
+    <span class="card-icon">💰</span>
+    <div class="card-label">Spotpris</div>
+    <div class="card-val" id="cardSpot">— ø</div>
+    <div class="card-sub" id="cardBuyOre">kjøp: — ø</div>
+  </div>
+  <div class="card" style="--card-accent:#34d399">
+    <span class="card-icon">📈</span>
+    <div class="card-label">Profitt i dag</div>
+    <div class="card-val" id="cardProfit">— kr</div>
+    <div class="card-sub" id="cardProfitSub">total: — kr</div>
+  </div>
+</div>
 
-  <div id="lastUpdate"></div>
-</main>
+<!-- PRICE BARS -->
+<div class="price-strip">
+  <h2>Spotpris neste 24t</h2>
+  <div class="price-bars" id="priceBars"></div>
+</div>
+
+<!-- TRADE LOG -->
+<div class="trade-section">
+  <h2>Siste handler</h2>
+  <div id="tradeLog"></div>
+</div>
+
+<div class="update-line" id="updateLine">oppdaterer...</div>
 
 <script>
-let priceChart = null;
+// ── SUN ARC ──
+const SITE_LAT = 60.14, SITE_LON = 10.25;
 
-async function fetchStatus() {
-  const res = await fetch('/api/status');
-  const d = await res.json();
-
-  document.getElementById('spotOre').textContent = d.price.spot_ore + ' øre';
-  document.getElementById('buyOre').textContent = d.price.buy_ore + ' øre';
-  const rawBuy = (d.price.discharge_margin_ore + d.price.sell_ore).toFixed(1);
-  document.getElementById('buyOreSub').textContent = `øre inkl alt − Norgespris (uten støtte: ${rawBuy}ø)`;
-
-  const sellEl = document.getElementById('sellOre');
-  sellEl.textContent = d.price.sell_ore + ' øre';
-
-  const margin = d.price.discharge_margin_ore;
-  const minSpread = d.min_spread_ore || 110;
-  const marginEl = document.getElementById('marginOre');
-  const marginStatus = document.getElementById('marginStatus');
-  marginEl.textContent = (margin >= 0 ? '+' : '') + margin + ' øre';
-  marginEl.className = 'card-value ' + (margin >= minSpread ? 'green' : margin >= 0 ? 'yellow' : 'red');
-
-  if (margin >= minSpread) {
-    marginStatus.innerHTML = '<span class="badge badge-green">⚡ Lønnsomt å utlade</span>';
-  } else if (margin >= 0) {
-    marginStatus.innerHTML = `<span class="badge badge-yellow">⚠ Under terskel (${minSpread}ø)</span>`;
-  } else {
-    marginStatus.innerHTML = '<span class="badge badge-red">🔋 Lønnsomt å lade</span>';
-  }
-
-  document.getElementById('todayProfit').textContent = d.profit.today_nok.toFixed(2) + ' kr';
-  document.getElementById('totalProfit').textContent = d.profit.total_nok.toFixed(2) + ' kr';
-  document.getElementById('todayBought').textContent = d.profit.today_bought_kwh + ' kWh';
-  document.getElementById('todaySold').textContent = d.profit.today_sold_kwh + ' kWh';
-
-  const dm = d.price.discharge_margin_ore;
-  const dmColor = dm >= minSpread ? '#22c55e' : dm >= 0 ? '#facc15' : '#60a5fa';
-  document.getElementById('statusBar').innerHTML =
-    `<strong>Status:</strong> Live &nbsp;|&nbsp;
-     <strong>Spot:</strong> ${d.price.spot_ore} øre &nbsp;|&nbsp;
-     <strong>Kjøp (reell):</strong> ${d.price.buy_ore} øre &nbsp;|&nbsp;
-     <strong>Salg:</strong> ${d.price.sell_ore} øre &nbsp;|&nbsp;
-     <strong>Utlade-margin:</strong> <span style="color:${dmColor}">${dm >= 0 ? '+' : ''}${dm} øre</span> &nbsp;|&nbsp;
-     <strong>Kapasitetsledd:</strong> ${d.capacity_charge_nok} kr/mnd`;
-
-  document.getElementById('lastUpdate').textContent =
-    'Oppdatert: ' + new Date().toLocaleTimeString('no-NO');
+function getSunTimes(date) {
+  // Enkel soloppgang/solnedgang-beregning for fast breddegrad
+  const J = date.getTime()/86400000 + 2440587.5;
+  const n = J - 2451545.0 + 0.0008;
+  const Jstar = n - SITE_LON/360;
+  const M = (357.5291 + 0.98560028*Jstar) % 360;
+  const C = 1.9148*Math.sin(M*Math.PI/180) + 0.0200*Math.sin(2*M*Math.PI/180) + 0.0003*Math.sin(3*M*Math.PI/180);
+  const lam = (M + C + 180 + 102.9372) % 360;
+  const Jtransit = 2451545.0 + Jstar + 0.0053*Math.sin(M*Math.PI/180) - 0.0069*Math.sin(2*lam*Math.PI/180);
+  const sinDec = Math.sin(lam*Math.PI/180)*Math.sin(23.44*Math.PI/180);
+  const cosHa = (Math.sin(-0.83*Math.PI/180) - Math.sin(SITE_LAT*Math.PI/180)*sinDec)
+               / (Math.cos(SITE_LAT*Math.PI/180)*Math.cos(Math.asin(sinDec)));
+  if (Math.abs(cosHa) > 1) return null;
+  const Ha = Math.acos(cosHa)*180/Math.PI;
+  const Jrise = Jtransit - Ha/360;
+  const Jset  = Jtransit + Ha/360;
+  const toDate = J0 => new Date((J0 - 2440587.5)*86400000);
+  return { rise: toDate(Jrise), set: toDate(Jset), transit: toDate(Jtransit) };
 }
 
-async function fetchPrices() {
-  const res = await fetch('/api/prices');
-  const prices = await res.json();
+function pad2(n){ return String(n).padStart(2,'0'); }
+function fmtTime(d){ return d ? `${pad2(d.getHours())}:${pad2(d.getMinutes())}` : '--:--'; }
 
-  const labels = prices.map(p => p.time);
-  const buyData = prices.map(p => p.buy_ore);
-  const sellData = prices.map(p => p.sell_ore);
+function updateSun() {
+  const now = new Date();
+  const sun = getSunTimes(now);
+  if (!sun) return;
 
-  if (priceChart) {
-    priceChart.data.labels = labels;
-    priceChart.data.datasets[0].data = buyData;
-    priceChart.data.datasets[1].data = sellData;
-    priceChart.update('none');
+  document.getElementById('labelRise').textContent = fmtTime(sun.rise);
+  document.getElementById('labelSet').textContent  = fmtTime(sun.set);
+
+  // Sol-posisjon langs buen (0–1)
+  const total = sun.set - sun.rise;
+  const elapsed = now - sun.rise;
+  const t = Math.max(0, Math.min(1, elapsed / total));
+
+  // Parametrisk punkt på kvadratisk Bezier: P(t) = (1-t)^2 * P0 + 2t(1-t)*P1 + t^2*P2
+  // P0=(5%,97%), P1=(50%,-12%), P2=(95%,97%) — i prosent av sky-boksen
+  const p0x=5, p0y=97, p1x=50, p1y=-12, p2x=95, p2y=97;
+  const sx = (1-t)*(1-t)*p0x + 2*t*(1-t)*p1x + t*t*p2x;
+  const sy = (1-t)*(1-t)*p0y + 2*t*(1-t)*p1y + t*t*p2y;
+
+  const sky = document.getElementById('skyScene');
+  const W = sky.offsetWidth, H = sky.offsetHeight;
+  const orb = document.getElementById('sunOrb');
+  orb.style.left = (sx/100*W) + 'px';
+  orb.style.top  = (sy/100*H) + 'px';
+
+  // Glød ved horisonten
+  const nearHorizon = t < 0.08 || t > 0.92;
+  orb.style.boxShadow = nearHorizon
+    ? '0 0 40px 20px rgba(251,120,36,0.7), 0 0 80px 40px rgba(251,120,36,0.3)'
+    : '0 0 30px 15px rgba(251,191,36,0.5), 0 0 60px 30px rgba(251,191,36,0.2)';
+
+  // Skjul orb om natten
+  const isDay = now >= sun.rise && now <= sun.set;
+  orb.style.display = isDay ? 'block' : 'none';
+}
+
+// ── FLOW ARROWS ──
+function setArrow(id, wattId, watts, direction, color) {
+  const line = document.getElementById(id);
+  const label = document.getElementById(wattId);
+  if (Math.abs(watts) < 20) {
+    line.className = 'arrow-line';
+    line.style.background = 'rgba(255,255,255,0.06)';
+    if (label) label.textContent = '';
     return;
   }
-
-  const ctx = document.getElementById('priceChart').getContext('2d');
-  priceChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: 'Kjøpspris (reell)',
-          data: buyData,
-          borderColor: '#60a5fa',
-          backgroundColor: '#60a5fa22',
-          fill: true,
-          tension: 0.3,
-          pointRadius: 2,
-        },
-        {
-          label: 'Salgspris (spot eks mva)',
-          data: sellData,
-          borderColor: '#22c55e',
-          borderDash: [5, 5],
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: false,
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
-      scales: {
-        x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-        y: {
-          ticks: { color: '#64748b', callback: v => v + 'ø' },
-          grid: { color: '#1e293b' }
-        }
-      }
-    }
-  });
-}
-
-let planChart = null;
-
-async function fetchActivity() {
-  try {
-    const res = await fetch('/api/activity');
-    const d = await res.json();
-    const banner = document.getElementById('liveActivityBanner');
-    const act = d.current_action;
-    const batW = d.battery_w ?? 0;
-    const solW = d.solar_w ?? 0;
-
-    if (act && act.action !== 'idle') {
-      const isCharge = act.action === 'charge';
-      const icon = isCharge ? '🔋' : '⚡';
-      const color = isCharge ? '#3b82f6' : '#f97316';
-      const label = isCharge ? `Lader ${act.power_kw.toFixed(1)}kW` : `Utlader ${act.power_kw.toFixed(1)}kW`;
-      banner.style.display = 'block';
-      banner.style.background = isCharge ? 'rgba(59,130,246,0.15)' : 'rgba(249,115,22,0.15)';
-      banner.style.color = color;
-      banner.style.border = `1px solid ${color}44`;
-      banner.innerHTML = `${icon} <strong>NÅ AKTIV:</strong> ${label} &nbsp;|&nbsp; Batteri ${batW > 0 ? '+' : ''}${Math.round(batW)}W &nbsp;|&nbsp; ${act.reason || ''}`;
-    } else {
-      // Idle — vis hva som skjer live
-      let status = '⏸️ Idle';
-      if (solW > 200 && batW > 100) status = `☀️ Sol ${(solW/1000).toFixed(1)}kW lader batteri (+${Math.round(batW)}W)`;
-      else if (solW > 200) status = `☀️ Sol ${(solW/1000).toFixed(1)}kW — selvforbruk`;
-      else if (batW < -100) status = `🔋 Batteri utlader ${Math.round(Math.abs(batW))}W`;
-      banner.style.display = 'block';
-      banner.style.background = 'rgba(148,163,184,0.1)';
-      banner.style.color = '#94a3b8';
-      banner.style.border = '1px solid #33415544';
-      banner.innerHTML = status;
-    }
-  } catch(e) {}
-}
-
-let tradeViewMode = 'detailed'; // 'detailed' or 'hourly'
-
-function toggleTradeView() {
-  tradeViewMode = tradeViewMode === 'detailed' ? 'hourly' : 'detailed';
-  document.getElementById('tradeViewBtn').textContent = tradeViewMode === 'detailed' ? 'Vis per time' : 'Vis detaljer';
-  fetchTrades();
-}
-
-async function fetchTrades() {
-  const tbody = document.getElementById('tradesTable');
-  const thead = document.getElementById('tradesHeader');
-  const summary = document.getElementById('tradesSummary');
-  
-  if (tradeViewMode === 'hourly') {
-    // Hourly grouped view
-    thead.innerHTML = '<tr><th>Time</th><th>Kjøpt</th><th>Solgt</th><th>Netto</th></tr>';
-    const res = await fetch('/api/trades/hourly?hours=24');
-    const hourly = await res.json();
-    if (!hourly.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:#475569">Ingen handler i dag</td></tr>';
-      summary.style.display = 'none';
-      return;
-    }
-    
-    let totalBought = 0, totalSold = 0, totalProfit = 0;
-    tbody.innerHTML = hourly.map(h => {
-      totalBought += h.bought_kwh;
-      totalSold += h.sold_kwh;
-      totalProfit += h.net_profit_nok;
-      const hourLabel = h.hour.substring(11, 13) + ':00';
-      const netClass = h.net_profit_nok >= 0 ? 'green' : 'red';
-      return `<tr>
-        <td style="color:#64748b">${hourLabel}</td>
-        <td style="color:#60a5fa">${h.bought_kwh > 0 ? '+' + h.bought_kwh.toFixed(1) : '—'}</td>
-        <td style="color:#fb923c">${h.sold_kwh > 0 ? '-' + h.sold_kwh.toFixed(1) : '—'}</td>
-        <td style="color:${h.net_profit_nok >= 0 ? '#22c55e' : '#ef4444'}">${h.net_profit_nok >= 0 ? '+' : ''}${h.net_profit_nok.toFixed(2)} kr</td>
-      </tr>`;
-    }).join('');
-    
-    summary.innerHTML = `📊 Totalt: <span style="color:#60a5fa">+${totalBought.toFixed(1)} kWh</span> kjøpt, <span style="color:#fb923c">-${totalSold.toFixed(1)} kWh</span> solgt = <span style="color:${totalProfit >= 0 ? '#22c55e' : '#ef4444'}">${totalProfit >= 0 ? '+' : ''}${totalProfit.toFixed(2)} kr</span>`;
-    summary.style.display = 'block';
-  } else {
-    // Detailed view
-    thead.innerHTML = '<tr><th>Tid</th><th>Type</th><th>kWh</th><th>Pris</th></tr>';
-    summary.style.display = 'none';
-    const res = await fetch('/api/trades');
-    const trades = await res.json();
-    if (!trades.length) {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:#475569">Ingen handler ennå</td></tr>';
-      return;
-    }
-
-    tbody.innerHTML = trades.map(t => {
-      const typeClass = t.trade_type === 'sell' ? 'orange' : t.trade_type === 'peak_shave' ? 'yellow' : 'blue';
-      const typeLabel = t.trade_type === 'sell' ? '⚡ Solgt' : t.trade_type === 'peak_shave' ? '🔒 Peak' : '🔋 Kjøpt';
-      const priceOre = t.price_nok_kwh > 0 ? (t.price_nok_kwh * 100).toFixed(0) + 'ø spot' : '—';
-      const price = t.net_profit_nok && t.energy_kwh > 0
-        ? (Math.abs(t.net_profit_nok) / t.energy_kwh * 100).toFixed(1) + 'ø netto'
-        : priceOre;
-      return `<tr>
-        <td style="color:#64748b">${t.timestamp ? t.timestamp.substring(11,16) : '—'}</td>
-        <td><span class="${typeClass}">${typeLabel}</span></td>
-        <td>${t.energy_kwh?.toFixed(1) ?? '—'}</td>
-        <td>${price}</td>
-      </tr>`;
-    }).join('');
+  line.className = 'arrow-line ' + (direction === 'right' ? 'active-right' : 'active-left');
+  line.style.background = `linear-gradient(90deg, transparent, ${color}, transparent)`;
+  line.style.setProperty('--c', color);
+  if (line.querySelector && !line._pseudo) {
+    // inject pseudo via dynamic style
   }
+  // override ::after color via a sibling approach
+  line.style.backgroundSize = '200%';
+  if (label) label.textContent = Math.abs(Math.round(watts)) + ' W';
 }
 
-async function fetchPlan() {
-  const res = await fetch('/api/plan');
-  const plan = await res.json();
-  if (!plan.length) return;
-
-  const nowHour = new Date().getHours();
-
-  // Oppdater tabell
-  const tbody = document.getElementById('planTable');
-  tbody.innerHTML = plan.map(a => {
-    const planHour = parseInt(a.time.split(' ')[1]);
-    const isNow = planHour === nowHour;
-    const actionInfo = a.action === 'discharge'
-      ? { icon: '⚡', cls: 'orange', label: 'Utlad' }
-      : a.action === 'charge'
-      ? { icon: '🔋', cls: 'blue', label: 'Lad' }
-      : { icon: '⏸️', cls: '', label: 'Idle' };
-    const profitStr = a.action !== 'idle' && a.profit_nok !== 0
-      ? `<span style="font-size:.75rem;color:#64748b"> (${a.profit_nok > 0 ? '+' : ''}${a.profit_nok.toFixed(2)} kr)</span>`
-      : '';
-    return `<tr${isNow ? ' style="background:#162032;border-left:2px solid #3b82f6"' : ''}>
-      <td style="color:#64748b;font-variant-numeric:tabular-nums">${a.time}</td>
-      <td><span class="${actionInfo.cls}">${actionInfo.icon} ${actionInfo.label}</span>${profitStr}</td>
-      <td style="color:#e2e8f0">${a.power_kw !== 0 ? Math.abs(a.power_kw).toFixed(1) : '—'}</td>
-      <td style="color:#64748b;font-size:.78rem">${a.reason || '—'}</td>
-    </tr>`;
-  }).join('');
-
-  // Oppdater planChart
-  const labels   = plan.map(a => a.time);
-  const discharge = plan.map(a => a.action === 'discharge' ? Math.abs(a.power_kw) : 0);
-  const charge    = plan.map(a => a.action === 'charge'    ? a.power_kw : 0);
-  const idle      = plan.map(a => a.action === 'idle'      ? 0.5 : 0);
-
-  if (planChart) {
-    planChart.data.labels = labels;
-    planChart.data.datasets[0].data = discharge;
-    planChart.data.datasets[1].data = charge;
-    planChart.update('none');
-    return;
-  }
-
-  const ctx = document.getElementById('planChart').getContext('2d');
-  planChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: '⚡ Utlad (kW)',
-          data: discharge,
-          backgroundColor: '#fb923c99',
-          borderColor: '#fb923c',
-          borderWidth: 1,
-        },
-        {
-          label: '🔋 Lad (kW)',
-          data: charge,
-          backgroundColor: '#60a5fa99',
-          borderColor: '#60a5fa',
-          borderWidth: 1,
-        },
-      ]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
-        tooltip: {
-          callbacks: {
-            afterLabel: (ctx) => {
-              const item = plan[ctx.dataIndex];
-              return item.reason ? `📝 ${item.reason}` : '';
-            }
-          }
-        }
-      },
-      scales: {
-        x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-        y: {
-          ticks: { color: '#64748b', callback: v => v + ' kW' },
-          grid: { color: '#1e293b' },
-          min: 0,
-        }
-      }
-    }
-  });
-}
-
-async function fetchLive() {
+// ── DATA FETCH ──
+async function fetchAll() {
   try {
-    const res = await fetch('/api/live');
-    const d = await res.json();
-
-    if (d.error || d.soc === null) {
-      // Ingen live Modbus — skjul ikke seksjonen, vis "Ikke tilkoblet"
-      document.getElementById('liveSoc').textContent = '—';
-      document.getElementById('liveGrid').textContent = '—';
-      document.getElementById('liveSolar').textContent = '—';
-      document.getElementById('liveBattery').textContent = '—';
-      document.getElementById('liveGridSub').textContent = d.error ? 'Modbus: ' + d.error.substring(0,30) : 'Kobler til...';
-      return;
-    }
-
-    // SOC
-    const soc = d.soc ?? 0;
-    const socColor = soc >= 80 ? '#22c55e' : soc >= 50 ? '#facc15' : '#ef4444';
-    document.getElementById('liveSoc').textContent = soc.toFixed(1) + '%';
-    document.getElementById('liveSoc').style.color = socColor;
-    document.getElementById('socBarFill').style.width = soc + '%';
-    document.getElementById('socBarFill').style.background = socColor;
-
-    // Grid
-    const gw = d.grid_w ?? 0;
-    const gridEl = document.getElementById('liveGrid');
-    gridEl.textContent = (gw >= 0 ? '+' : '') + Math.round(gw) + ' W';
-    gridEl.style.color = gw > 500 ? '#ef4444' : gw < -100 ? '#22c55e' : '#94a3b8';
-    const direction = gw > 50 ? 'importerer fra nett' : gw < -50 ? 'eksporterer til nett' : 'nøytral';
-    document.getElementById('liveGridDir').textContent = direction;
-    const src = d.grid_source || 'modbus';
-    const badge = document.getElementById('liveGridBadge');
-    badge.innerHTML = src === 'qubino'
-      ? '<span style="font-size:.68rem;background:#14532d;color:#22c55e;padding:.1rem .4rem;border-radius:4px">Qubino ✓ (L1+L2+L3)</span>'
-      : '<span style="font-size:.68rem;background:#422006;color:#facc15;padding:.1rem .4rem;border-radius:4px">⚠ Modbus (L3=0)</span>';
-    const l1 = d.grid_l1 ?? 0;
-    const l2 = d.grid_l2 ?? 0;
-    const l3 = d.grid_l3 ?? 0;
-    document.getElementById('liveGridPhases').textContent =
-      `L1: ${Math.round(l1)}W  L2: ${Math.round(l2)}W  L3: ${Math.round(l3)}W`;
-
-    // Sol
-    const sw = d.solar_w ?? 0;
-    document.getElementById('liveSolar').textContent = Math.round(sw) + ' W';
-    const pct = Math.min(100, (sw / (CONFIG_SOLAR_MAX * 1000)) * 100);
-    document.getElementById('liveSolarSub').textContent = sw > 0 ? `${pct.toFixed(0)}% av ${CONFIG_SOLAR_MAX}kW maks` : 'ingen produksjon';
-
-    // Batteri
-    const bw = d.battery_w ?? 0;
-    const batEl = document.getElementById('liveBattery');
-    batEl.textContent = (bw >= 0 ? '+' : '') + Math.round(bw) + ' W';
-    batEl.style.color = bw > 100 ? '#60a5fa' : bw < -100 ? '#fb923c' : '#94a3b8';
-    document.getElementById('liveBatterySub').textContent = bw > 100 ? 'lader' : bw < -100 ? 'utlader' : 'standby';
-
+    const [live, status, trades, prices] = await Promise.all([
+      fetch('/api/live').then(r=>r.json()),
+      fetch('/api/status').then(r=>r.json()),
+      fetch('/api/trades').then(r=>r.json()),
+      fetch('/api/prices').then(r=>r.json()),
+    ]);
+    updateUI(live, status, trades, prices);
   } catch(e) {
-    console.warn('fetchLive feil:', e);
+    console.error(e);
   }
 }
 
-// Inject solar max fra server
-let CONFIG_SOLAR_MAX = 5.0;
-fetch('/api/status').then(r=>r.json()).then(d => { CONFIG_SOLAR_MAX = d.solar_max_kw || 5.0; });
-
-async function refresh() {
-  await Promise.all([fetchStatus(), fetchPrices(), fetchTrades(), fetchPlan(), fetchLive(), fetchActivity()]);
+function fmtW(w) {
+  if (w == null) return '— W';
+  const abs = Math.abs(w);
+  return abs >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W';
 }
 
-refresh();
-setInterval(refresh, 10000);
+function updateUI(live, status, trades, prices) {
+  const soc     = live.soc ?? 0;
+  const solarW  = live.solar_w ?? 0;
+  const gridW   = live.grid_w ?? 0;
+  const batW    = live.battery_w ?? 0;
+  // Estimated load = solar + grid import - grid export + battery discharge
+  const loadW = Math.max(0, solarW + Math.max(0, gridW) - Math.max(0, -gridW) + Math.max(0, -batW) - Math.max(0, batW));
+  const loadEst = solarW + gridW - batW;
+
+  // Grid display
+  document.getElementById('gridW').textContent = fmtW(gridW);
+  document.getElementById('gridW').style.color = gridW > 50 ? '#60a5fa' : gridW < -50 ? '#22c55e' : '#94a3b8';
+
+  document.getElementById('solarW').textContent = fmtW(solarW);
+  document.getElementById('loadW').textContent  = fmtW(Math.max(0, loadEst));
+  document.getElementById('batW').textContent   = fmtW(batW);
+  document.getElementById('batW').style.color   = batW > 50 ? '#22c55e' : batW < -50 ? '#fb923c' : '#94a3b8';
+
+  // Battery visual
+  document.getElementById('batFill').style.height = Math.max(0, Math.min(100, soc)) + '%';
+  document.getElementById('batPct').textContent   = soc ? soc.toFixed(1)+'%' : '—%';
+  document.getElementById('cardBatPct').textContent = soc ? soc.toFixed(1)+'%' : '—%';
+  document.getElementById('cardBatSub').textContent = fmtW(batW) + (batW > 50 ? ' 🔼' : batW < -50 ? ' 🔽' : '');
+
+  // Battery fill color by SOC
+  const fill = document.getElementById('batFill');
+  fill.style.background = soc > 70
+    ? 'linear-gradient(180deg,#15803d 0%,#22c55e 100%)'
+    : soc > 35
+    ? 'linear-gradient(180deg,#ca8a04 0%,#facc15 100%)'
+    : 'linear-gradient(180deg,#b91c1c 0%,#ef4444 100%)';
+  fill.style.boxShadow = soc > 70
+    ? '0 -4px 12px rgba(34,197,94,0.4)'
+    : soc > 35
+    ? '0 -4px 12px rgba(250,204,21,0.4)'
+    : '0 -4px 12px rgba(239,68,68,0.4)';
+
+  // Arrows
+  // Grid → Hus (import positive, export negative)
+  if (gridW > 50) setArrow('arrowGrid','arrowGridW', gridW, 'right', '#60a5fa');
+  else if (gridW < -50) setArrow('arrowGrid','arrowGridW', gridW, 'left', '#22c55e');
+  else setArrow('arrowGrid','arrowGridW', 0, 'right', '#60a5fa');
+
+  // Sol → Hus
+  if (solarW > 50) setArrow('arrowSolar','arrowSolarW', solarW, 'left', '#f59e0b');
+  else setArrow('arrowSolar','arrowSolarW', 0, 'right', '#f59e0b');
+
+  // Bat ↕
+  if (batW > 50) setArrow('arrowBat','arrowBatW', batW, 'left', '#22c55e');
+  else if (batW < -50) setArrow('arrowBat','arrowBatW', batW, 'right', '#fb923c');
+  else setArrow('arrowBat','arrowBatW', 0, 'right', '#22c55e');
+
+  // Cards
+  document.getElementById('cardSpot').textContent   = status.price ? Math.round(status.price.spot_ore)+' ø' : '— ø';
+  document.getElementById('cardBuyOre').textContent = status.price ? 'kjøp: '+Math.round(status.price.buy_ore)+' ø' : '';
+  document.getElementById('cardProfit').textContent  = status.profit ? (status.profit.today_nok >= 0 ? '+' : '')+status.profit.today_nok.toFixed(2)+' kr' : '— kr';
+  document.getElementById('cardProfitSub').textContent = status.profit ? 'total: '+status.profit.total_nok.toFixed(2)+' kr' : '';
+
+  // Solar today (use sold_kwh as proxy, or show from live)
+  document.getElementById('cardSolarToday').textContent = solarW >= 0 ? (solarW/1000).toFixed(2)+' kW nå' : '—';
+
+  // Action badge
+  try {
+    fetch('/api/activity').then(r=>r.json()).then(act => {
+      const badge = document.getElementById('actionBadge');
+      const a = act.current_action?.action || 'idle';
+      const colors = {charge:'#22c55e', discharge:'#fb923c', idle:'#60a5fa'};
+      const labels = {charge:'LADER', discharge:'UTLADER', idle:'IDLE'};
+      badge.textContent = labels[a] || a.toUpperCase();
+      badge.style.color = colors[a] || '#60a5fa';
+      badge.style.borderColor = colors[a] || '#60a5fa';
+      badge.style.background = (colors[a] || '#60a5fa')+'22';
+    });
+  } catch(e){}
+
+  // Price bars
+  renderPriceBars(prices);
+
+  // Trades
+  renderTrades(trades);
+
+  // Update time
+  const upd = live.updated ? new Date(live.updated) : new Date();
+  document.getElementById('updateLine').textContent = 'Oppdatert ' + fmtTime(upd);
+}
+
+function renderPriceBars(prices) {
+  if (!prices || !prices.length) return;
+  const container = document.getElementById('priceBars');
+  const maxOre = Math.max(...prices.map(p=>p.buy_ore));
+  const now = new Date();
+  const nowH = now.getHours();
+  container.innerHTML = prices.slice(0,24).map((p,i) => {
+    const h = parseInt(p.time.slice(-5));
+    const isCurrent = p.time.includes(pad2(nowH)+':');
+    const pct = Math.max(8, Math.round(p.buy_ore/maxOre*100));
+    const color = p.buy_ore > maxOre*0.8 ? '#ef4444' : p.buy_ore < maxOre*0.4 ? '#22c55e' : '#60a5fa';
+    return `<div class="price-bar-wrap">
+      <div class="price-bar${isCurrent?' price-bar-now':''}" 
+           style="height:${pct}%;background:${isCurrent?'var(--accent)':color}33;border-top:2px solid ${isCurrent?'var(--accent)':color};"
+           title="${p.buy_ore.toFixed(0)}ø"></div>
+      <div class="price-bar-time">${p.time.slice(-5,-3)}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTrades(trades) {
+  const container = document.getElementById('tradeLog');
+  if (!trades || !trades.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0">Ingen handler ennå</div>';
+    return;
+  }
+  container.innerHTML = trades.slice(0,8).map(t => {
+    const isBuy = t.action === 'buy';
+    const color = isBuy ? '#60a5fa' : '#22c55e';
+    const profit = t.net_profit_nok >= 0 ? '+'+t.net_profit_nok.toFixed(2) : t.net_profit_nok.toFixed(2);
+    const profitColor = t.net_profit_nok >= 0 ? '#22c55e' : '#ef4444';
+    const time = t.timestamp ? t.timestamp.slice(11,16) : '--:--';
+    return `<div class="trade-row">
+      <div class="trade-dot" style="background:${color}"></div>
+      <div class="trade-time">${time}</div>
+      <div class="trade-type" style="color:${color}">${isBuy ? 'Kjøp' : 'Salg'}</div>
+      <div style="color:var(--muted);font-size:0.7rem">${t.energy_kwh?.toFixed(1)||'—'} kWh @ ${Math.round((t.price_nok_kwh||0)*100)}ø</div>
+      <div class="trade-profit" style="color:${profitColor}">${profit} kr</div>
+    </div>`;
+  }).join('');
+}
+
+// ── INIT ──
+updateSun();
+setInterval(updateSun, 60000);
+fetchAll();
+setInterval(fetchAll, 10000);
 </script>
 </body>
 </html>
+
 """
 
 if __name__ == "__main__":
