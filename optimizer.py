@@ -148,12 +148,20 @@ class Optimizer:
         # --- Bygg handlingsplan ---
         actions = []
         soc = current_soc
+        # Sol-produksjon per time: bruk live solar_kw for nåværende time,
+        # for fremtidige timer estimeres sol fra time på dagen (08-18 = sol mulig)
+        now_hour = datetime.now(OSLO_TZ).hour
 
         for i, p in enumerate(prices):
             p_spot_ore = p.price_ore_kwh / CONFIG.vat
             local_hour = p.timestamp.astimezone(OSLO_TZ).hour
             is_night = not (6 <= local_hour < 22)
-            sol_lader = solar_kw >= CONFIG.solar_threshold_kw
+            # Sol-estimat: live kW for nåværende time, ellers basert på time på dagen
+            if i == 0:
+                sol_lader = solar_kw >= CONFIG.solar_threshold_kw
+            else:
+                # Fremtidige timer: sol forventes mellom 08-18 (grov estimering)
+                sol_lader = (8 <= local_hour < 19) and not is_night
             buy_ore = buy_prices[i]
 
             # UTLAD: Kun i de planlagte topp-timene
@@ -237,7 +245,7 @@ class Optimizer:
                 idle_reason = f'Spread {spread:.0f}ø < {CONFIG.min_price_diff_nok * 100:.0f}ø terskel'
             actions.append(Action(timestamp=p.timestamp, action='idle', power_kw=0.0, reason=idle_reason))
 
-        return actions
+        return actions, charge_target_soc
 
     def peak_shave(self, current_grid_kw: float, soc: float) -> Optional[Action]:
         """
@@ -276,17 +284,16 @@ class Optimizer:
 
     def get_immediate_action(self, current_price: PricePoint,
                             prices: List[PricePoint],
-                            soc: float, solar_kw: float = 0.0) -> Action:
-        """Get action for current hour only.
+                            soc: float, solar_kw: float = 0.0) -> tuple:
+        """Get action for current hour + charge_target_soc for DVCC-styring.
 
-        Prisene fra fetcher er filtrert til "future hours" (>= now), sa
-        plan[0] er enten navarende time (hvis fortsatt aktiv) eller neste.
-        Vi tar plan[0] direkte for a unnga tidssone-mismatch.
+        Returnerer (Action, charge_target_soc) slik at main.py kan bruke
+        charge_target_soc i _enforce_max_soc for korrekt DVCC-grense.
         """
-        plan = self.optimize(prices, soc, solar_kw)
+        plan, charge_target_soc = self.optimize(prices, soc, solar_kw)
         if plan:
-            return plan[0]
-        return Action(timestamp=datetime.now(OSLO_TZ), action='idle', power_kw=0.0)
+            return plan[0], charge_target_soc
+        return Action(timestamp=datetime.now(OSLO_TZ), action='idle', power_kw=0.0), charge_target_soc
 
 
 if __name__ == "__main__":
@@ -294,8 +301,9 @@ if __name__ == "__main__":
     prices = fetcher.get_prices(24)
 
     opt = Optimizer()
-    plan = opt.optimize(prices, current_soc=60.0)
+    plan, target_soc = opt.optimize(prices, current_soc=60.0)
 
+    print(f"Lademål: {target_soc:.1f}% SOC")
     print("Plan for neste 24t:")
     for a in plan[:8]:
         emoji = "\U0001f50b" if a.action == 'charge' else "\u26a1" if a.action == 'discharge' else "\u23f8\ufe0f"
