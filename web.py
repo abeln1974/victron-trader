@@ -123,6 +123,8 @@ def api_status():
         "capacity_charge_nok": CAPACITY_CHARGE_NOK,
         "solar_max_kw": CONFIG.solar_max_kw,
         "min_spread_ore": int(CONFIG.min_price_diff_nok * 100),
+        "min_soc": int(CONFIG.min_soc) if hasattr(CONFIG, 'min_soc') else 20,
+        "max_soc": int(CONFIG.max_soc) if hasattr(CONFIG, 'max_soc') else 90,
     })
 
 
@@ -189,20 +191,26 @@ def api_activity():
 
 @app.route("/api/plan")
 def api_plan():
-    from optimizer import Optimizer
-    prices = get_prices_cached()
-    if not prices:
-        return jsonify([])
-    opt = Optimizer()
-    current_soc = _live_cache.get("soc", 70.0)  # Bruk reell SOC fra cache
-    plan = opt.optimize(prices, current_soc=current_soc)
-    return jsonify([{
-        "time": a.timestamp.astimezone(OSLO_TZ).strftime("%d.%m %H:%M"),
-        "action": a.action,
-        "power_kw": round(a.power_kw, 1),
-        "reason": a.reason,
-        "profit_nok": round(a.expected_profit_nok, 3),
-    } for a in plan])
+    try:
+        from optimizer import Optimizer
+        prices = get_prices_cached()
+        if not prices:
+            return jsonify([])
+        opt = Optimizer()
+        current_soc = _live_cache.get("soc", 70.0)
+        plan, _ = opt.optimize(prices, current_soc=current_soc)
+        return jsonify([{
+            "time": a.timestamp.astimezone(OSLO_TZ).strftime("%d.%m %H:%M"),
+            "action": a.action,
+            "power_kw": round(a.power_kw, 1),
+            "reason": a.reason,
+            "profit_nok": round(a.expected_profit_nok, 3),
+        } for a in plan])
+    except Exception as e:
+        import traceback
+        error_msg = f"Plan API error: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/")
@@ -619,6 +627,119 @@ body {
   font-family: 'JetBrains Mono', monospace;
 }
 
+/* ── PLAN TABLE ── */
+.plan-section {
+  padding: 0.5rem 1.5rem 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.plan-section h2 {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.plan-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+}
+
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.5rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+
+.plan-row.charge { border-left-color: #22c55e; }
+.plan-row.discharge { border-left-color: #fb923c; }
+.plan-row.idle { border-left-color: #60a5fa; }
+
+.plan-time { font-family: 'JetBrains Mono', monospace; color: var(--muted); min-width: 55px; }
+.plan-action { font-weight: 600; min-width: 70px; text-transform: uppercase; font-size: 0.7rem; }
+.plan-action.charge { color: #22c55e; }
+.plan-action.discharge { color: #fb923c; }
+.plan-action.idle { color: #60a5fa; }
+.plan-reason { color: var(--muted); flex: 1; font-size: 0.7rem; }
+.plan-profit { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; min-width: 50px; text-align: right; }
+.plan-profit.positive { color: #22c55e; }
+.plan-profit.negative { color: #ef4444; }
+.plan-power { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; min-width: 50px; text-align: right; color: var(--muted); }
+
+/* ── SETTINGS ── */
+.settings-section {
+  padding: 0.5rem 1.5rem 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.settings-section h2 {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.setting-label { color: var(--muted); }
+.setting-val { font-family: 'JetBrains Mono', monospace; color: var(--text); }
+
+/* ── SOLAR FORECAST ── */
+.solar-section {
+  padding: 0.5rem 1.5rem 1.5rem;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.solar-section h2 {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 0.5rem;
+}
+
+.solar-forecast {
+  display: flex;
+  gap: 1rem;
+}
+
+.forecast-item {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+
+.forecast-label { color: var(--muted); }
+.forecast-val { font-family: 'JetBrains Mono', monospace; color: var(--solar); }
+
 </style>
 </head>
 <body>
@@ -742,6 +863,50 @@ body {
   <div id="tradeLog"></div>
 </div>
 
+<!-- PLAN TABLE -->
+<div class="plan-section">
+  <h2>Handelsplan neste 24t</h2>
+  <div class="plan-table" id="planTable"></div>
+</div>
+
+<!-- SETTINGS -->
+<div class="settings-section">
+  <h2>Innstillinger</h2>
+  <div class="settings-grid" id="settingsGrid">
+    <div class="setting-item">
+      <span class="setting-label">Min SOC:</span>
+      <span class="setting-val" id="minSoc">--%</span>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">Max SOC:</span>
+      <span class="setting-val" id="maxSoc">--%</span>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">Min spread:</span>
+      <span class="setting-val" id="minSpread">--ø</span>
+    </div>
+    <div class="setting-item">
+      <span class="setting-label">Kapasitetsavgift:</span>
+      <span class="setting-val" id="capCharge">-- kr</span>
+    </div>
+  </div>
+</div>
+
+<!-- SOLAR FORECAST -->
+<div class="solar-section">
+  <h2>Solprognose</h2>
+  <div class="solar-forecast" id="solarForecast">
+    <div class="forecast-item">
+      <span class="forecast-label">I dag:</span>
+      <span class="forecast-val" id="solarToday">-- kWh</span>
+    </div>
+    <div class="forecast-item">
+      <span class="forecast-label">I morgen:</span>
+      <span class="forecast-val" id="solarTomorrow">-- kWh</span>
+    </div>
+  </div>
+</div>
+
 <div class="update-line" id="updateLine">oppdaterer...</div>
 
 <script>
@@ -830,16 +995,33 @@ function setArrow(id, wattId, watts, direction, color) {
 
 // ── DATA FETCH ──
 async function fetchAll() {
+  console.log('fetchAll called');
   try {
-    const [live, status, trades, prices] = await Promise.all([
-      fetch('/api/live').then(r=>r.json()),
-      fetch('/api/status').then(r=>r.json()),
-      fetch('/api/trades').then(r=>r.json()),
-      fetch('/api/prices').then(r=>r.json()),
+    const safeFetch = async (url, defaultVal) => {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) {
+          console.error(`API ${url} returned ${r.status}`);
+          return defaultVal;
+        }
+        return await r.json();
+      } catch(e) {
+        console.error(`API ${url} error:`, e);
+        return defaultVal;
+      }
+    };
+    
+    const [live, status, trades, prices, plan] = await Promise.all([
+      safeFetch('/api/live', {}),
+      safeFetch('/api/status', {}),
+      safeFetch('/api/trades', []),
+      safeFetch('/api/prices', []),
+      safeFetch('/api/plan', []),
     ]);
-    updateUI(live, status, trades, prices);
+    console.log('Data fetched:', {live, status, trades: trades?.length, prices: prices?.length, plan: plan?.length});
+    updateUI(live, status, trades, prices, plan);
   } catch(e) {
-    console.error(e);
+    console.error('fetchAll error:', e);
   }
 }
 
@@ -849,7 +1031,7 @@ function fmtW(w) {
   return abs >= 1000 ? (w/1000).toFixed(1)+' kW' : Math.round(w)+' W';
 }
 
-function updateUI(live, status, trades, prices) {
+function updateUI(live, status, trades, prices, plan) {
   const soc     = live.soc ?? 0;
   const solarW  = live.solar_w ?? 0;
   const gridW   = live.grid_w ?? 0;
@@ -909,6 +1091,51 @@ function updateUI(live, status, trades, prices) {
 
   // Solar today (use sold_kwh as proxy, or show from live)
   document.getElementById('cardSolarToday').textContent = solarW >= 0 ? (solarW/1000).toFixed(2)+' kW nå' : '—';
+
+  // Update trades
+  if (trades && Array.isArray(trades)) {
+    const tradeLog = document.getElementById('tradeLog');
+    tradeLog.innerHTML = trades.slice(0, 10).map(t => {
+      const profit = t.net_profit_nok || 0;
+      const isPos = profit >= 0;
+      const color = isPos ? '#22c55e' : '#ef4444';
+      return `<div class="trade-row">
+        <div class="trade-dot" style="background:${t.action === 'buy' ? '#22c55e' : '#fb923c'}"></div>
+        <span class="trade-time">${t.timestamp?.split('T')[1]?.slice(0,5) || '--:--'}</span>
+        <span class="trade-type">${t.action === 'buy' ? 'KJØPT' : 'SOLGT'}</span>
+        <span class="trade-kwh">${(t.energy_kwh || 0).toFixed(2)} kWh</span>
+        <span class="trade-profit" style="color:${color}">${isPos ? '+' : ''}${profit.toFixed(2)} kr</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Update plan
+  if (plan && Array.isArray(plan)) {
+    const planTable = document.getElementById('planTable');
+    planTable.innerHTML = plan.slice(0, 24).map(p => {
+      const profit = p.profit_nok || 0;
+      const isPos = profit > 0;
+      const cls = p.action || 'idle';
+      return `<div class="plan-row ${cls}">
+        <span class="plan-time">${p.time || '--'}</span>
+        <span class="plan-action ${cls}">${cls.toUpperCase()}</span>
+        <span class="plan-reason">${p.reason || ''}</span>
+        <span class="plan-power">${p.power_kw ? p.power_kw.toFixed(1) : '0'} kW</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Update settings
+  if (status) {
+    document.getElementById('minSoc').textContent = (status.min_soc || 20) + '%';
+    document.getElementById('maxSoc').textContent = (status.max_soc || 90) + '%';
+    document.getElementById('minSpread').textContent = (status.min_spread_ore || 110) + 'ø';
+    document.getElementById('capCharge').textContent = (status.capacity_charge_nok || 117) + ' kr';
+  }
+
+  // Update solar forecast (placeholder - fetch from solar API if available)
+  document.getElementById('solarToday').textContent = 'Estimerer...';
+  document.getElementById('solarTomorrow').textContent = 'Estimerer...';
 
   // Action badge
   try {
