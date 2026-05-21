@@ -195,16 +195,21 @@ class Optimizer:
                     soc = min(soc + soc_change, self.max_soc)
                     continue
 
-            # KVELDSUTLADING: Gjør plass til sol — utlad ned til charge_target_soc
-            # Kjøres kl 20-22 hvis SOC > charge_target_soc og sol-prognose er god
-            if (not storm_mode and 20 <= local_hour < 22
-                    and soc > charge_target_soc + 2.0
-                    and solar_reserve_pct > 5.0):
+            # SOL-RESERVE UTLADING: Gjør plass til sol — hele dagen (06-22)
+            # Utlad ned til charge_target_soc hvis SOC er over målet og sol-prognose tilsier det.
+            # Prioritet: lavere enn lønnsom arbitrasje, høyere enn idle.
+            # Bruker lav effekt (2 kW) for å ikke forstyrre peak-shaving-kapasitet.
+            # Stopper ved charge_target_soc — sol fyller opp resten.
+            if (not storm_mode
+                    and not is_night
+                    and solar_reserve_pct > 5.0
+                    and soc > charge_target_soc + 2.0):
                 avail_kwh = self.capacity * (soc - charge_target_soc) / 100
-                power = min(self.max_discharge, avail_kwh)
+                power = min(2.0, avail_kwh)  # Maks 2 kW — behold kapasitet til peak-shaving
                 if power > 0:
-                    reason = (f'Kveldsutlading: gjør plass til sol '
-                              f'(SOC {soc:.0f}%→{charge_target_soc:.0f}%, sol-reserve {solar_reserve_pct:.0f}%)')
+                    reason = (f'Sol-reserve: gjør plass til sol '
+                              f'(SOC {soc:.0f}%→{charge_target_soc:.0f}%, '
+                              f'reserve {solar_reserve_pct:.0f}%, 2kW sakte)')
                     actions.append(Action(
                         timestamp=p.timestamp, action='discharge',
                         power_kw=-power, expected_profit_nok=0.0,
