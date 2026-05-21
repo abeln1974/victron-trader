@@ -45,6 +45,7 @@ class EnergyTrader:
         self._solar_cache_kwh: float = 0.0
         self._solar_cache_time: float = 0.0
         self._SOLAR_CACHE_TTL: float = 3600.0  # 1 time
+        self._charge_target_soc: float = CONFIG.max_soc  # Oppdateres av optimizer
 
     def _save_state(self):
         """Lagre current_action til disk så den overlever restart."""
@@ -155,8 +156,10 @@ class EnergyTrader:
                     last_reconnect_attempt = current_time
                     logger.warning("Modbus ikke tilkoblet — forsøker reconnect...")
                     if self.victron.connect():
-                        logger.info("Modbus reconnect OK")
+                        logger.info("Modbus reconnect OK — gjenoppretter Mode 3")
                         self.victron.set_min_soc(CONFIG.min_soc)
+                        self.victron.enable_external_control()  # Gjenopprett Mode 3 etter Passthru
+                        last_keepalive = 0.0  # Tving umiddelbar keepalive
                     else:
                         logger.error("Modbus reconnect feilet — venter 30s")
                         time.sleep(3)
@@ -272,24 +275,27 @@ class EnergyTrader:
             logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh [{kwh_source}] (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
 
     def _enforce_max_soc(self):
-        """Håndhev max SOC.
+        """Håndhev max SOC via DVCC.
 
-        Ved SOC >= max_soc: DVCC max charge current = 0A — stopper MultiPlus fra å ta
-        inn Fronius-overskudd. Fronius-overskudd eksporteres da til nett automatisk.
-        Ved SOC < max_soc - 1%: frigjør DVCC (-1 = ingen grense).
+        Bruker _charge_target_soc fra optimizer (90% - sol_reserve) som grense.
+        Ved SOC >= charge_target_soc: DVCC=0A — stopper Fronius-overskudd fra å lade.
+        Overskudd eksporteres til nett automatisk.
+        Ved SOC < charge_target_soc - 1%: frigjør DVCC (-1A = ingen grense).
         """
         soc = self.victron.get_soc()
         if soc is None:
             return
 
-        if soc >= CONFIG.max_soc and not self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% >= {CONFIG.max_soc}% — DVCC=0A, Fronius-overskudd eksporteres")
-            self.victron.stop_ess_control()           # setpoint=0, Mode 3 beholdes
-            self.victron.set_max_charge_current(0)    # Stopper MultiPlus fra å lade
+        target = self._charge_target_soc  # Fra siste optimizer-kjøring, f.eks. 65.4%
+
+        if soc >= target and not self._dvcc_charging_stopped:
+            logger.info(f"SOC {soc:.1f}% >= lademål {target:.1f}% — DVCC=0A, eksporterer overskudd")
+            self.victron.stop_ess_control()
+            self.victron.set_max_charge_current(0)
             self._dvcc_charging_stopped = True
-        elif soc < CONFIG.max_soc - 1.0 and self._dvcc_charging_stopped:
-            logger.info(f"SOC {soc:.1f}% < {CONFIG.max_soc - 1.0}% — DVCC frigjort, lading tillatt igjen")
-            self.victron.set_max_charge_current(-1)   # Ingen grense
+        elif soc < target - 1.0 and self._dvcc_charging_stopped:
+            logger.info(f"SOC {soc:.1f}% < {target - 1.0:.1f}% — DVCC frigjort, lading tillatt igjen")
+            self.victron.set_max_charge_current(-1)
             self._dvcc_charging_stopped = False
 
     def _execute_trade_cycle(self):
@@ -318,8 +324,10 @@ class EnergyTrader:
             if solar_kw > 0:
                 logger.info(f"Sol: {solar_kw:.2f} kW")
 
-            action = self.optimizer.get_immediate_action(current, prices, soc, solar_kw)
+            action, charge_target_soc = self.optimizer.get_immediate_action(current, prices, soc, solar_kw)
+            self._charge_target_soc = charge_target_soc  # Cache for _enforce_max_soc
             logger.info(f"Action: {action.action} @ {action.power_kw:.1f}kW | {action.reason}")
+            logger.info(f"Lademål: {charge_target_soc:.1f}% SOC")
 
             prev_action = self.current_action
             # Hent fersk SOC rett før execute for å unngå utdatert data
