@@ -36,14 +36,15 @@ observe.py         — Diagnostikkverktøy: les alle Modbus-registre
 
 Trader eier Victron **alltid** via Mode 3 (ekstern kontroll):
 
-- **Oppstart** → Hub4Mode=3, setpoint=0, DVCC frigjort
+- **Oppstart** → Hub4Mode=3, setpoint=0, DVCC frigjort (-1A)
 - **Idle** → setpoint=0, keepalive 8s (Mode 3 holdes)
-- **Natt-lading** → setpoint=+kW, lader til `90% - sol_reserve_pct`
-- **Sol-reserve utlading** → utlader 2 kW hele dagen (06-22) ned til lademål hvis SOC > lademål + 2% og sol-prognose tilsier det
-- **Dag-utlading** → setpoint=-kW ved lønnsom spot (terskkel 1.10 kr)
+- **Natt-lading** → setpoint=+kW, lader til `charge_target_soc = 90% - sol_reserve_pct`
+- **Sol-reserve utlading** → 2 kW sakte hele dagen (06-22) ned til `charge_target_soc` — gjør plass til sol
+- **Dag-utlading** → setpoint=-kW ved lønnsom spot (terskel 1.10 kr inkl. batterislitasje)
 - **Peak-shaving** → utlader ved grid > 9.5 kW, hvert 10s
-- **SOC ≥ 90%** → DVCC=0A (stopper Fronius-overskudd fra å lade batteriet), eksport til nett
-- **SOC < 89%** → DVCC frigjøres (-1A = ingen grense)
+- **SOC ≥ charge_target_soc** → DVCC=0A (stopper Fronius-overskudd fra å lade batteriet), eksport til nett
+- **SOC < charge_target_soc - 1%** → DVCC frigjøres (-1A = ingen grense)
+- **Reconnect etter Modbus-feil** → `enable_external_control()` gjenoppretter Mode 3 umiddelbart
 - **Planlagt stopp** → `release_control()` → Hub4Mode=2, Victron overtar
 - **Krasj** → keepalive stopper → Passthru ~10s → Victron tar Mode 2 automatisk
 
@@ -53,16 +54,14 @@ Open-Meteo MEPS gir sol-prognose for i morgen. Systemet beregner:
 ```
 charge_target_soc = max_soc - solar_reserve_pct
 ```
-Eksempel: prognose 11 kWh → reserve 24.6% → lademål 65.4% SOC
+Eksempel: prognose 11 kWh → reserve 24.6% → `charge_target_soc = 65.4%`
 
-**Kontinuerlig sol-reserve utlading (hele dagen 06-22):**
-Hvis SOC > lademål + 2% utlader systemet sakte (2 kW) gjennom hele dagen — ikke bare om kvelden. 2 kW er valgt for å beholde 8 kW kapasitet til peak-shaving. Systemet stopper automatisk ved lademålet. Sol fyller opp resten på dagtid.
+`charge_target_soc` er dynamisk og brukes på tre steder:
+1. **Natt-lading**: lader kun til `charge_target_soc` (ikke alltid til 90%)
+2. **DVCC-grense**: DVCC=0A aktiveres ved SOC ≥ `charge_target_soc` — stopper Fronius fra å lade batteriet, overskudd eksporteres til nett
+3. **Sol-reserve utlading**: hele dagen (06-22) utlades 2 kW ned mot `charge_target_soc` hvis SOC er over målet
 
-Eksempel med prognose 11 kWh (reserve 24.6%):
-- Lademål: 65.4% SOC
-- Kl 08: SOC=85% → utlader 2 kW → ~1.4% per time
-- Kl 14: SOC≈65% → stopper
-- Sol fyller fra 65% → 90% på ettermiddagen
+**Fremtidsprognose i plan:** Optimizer vet at sol forventes kl 08-19 — planlegger idle (sol lader gratis) for disse timene, ikke utlading. Kjøretid på natt gir korrekt fremtidsplan.
 
 **Storm mode:** Hvis prognose < 10 kWh → MIN_SOC heves fra 35% til 45% (30t nødstrøm), lades til 90%, ingen sol-reserve utlading.
 
