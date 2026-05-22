@@ -1,4 +1,5 @@
 """Henter spotpriser fra hvakosterstrommen.no (primær) med Nordpool direkte som fallback."""
+import time
 import requests
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
@@ -17,9 +18,13 @@ class PriceFetcher:
     PRIMARY_URL  = "https://www.hvakosterstrommen.no/api/v1/prices"
     # Nordpool offisielt day-ahead API (ingen auth nødvendig for day-ahead)
     NORDPOOL_URL = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
+    _CACHE_TTL   = 300.0  # 5 minutter — priser endres kun én gang per dag (13:00)
 
     def __init__(self, price_area: str = CONFIG.price_area):
         self.price_area = price_area
+        self._cache: List[PricePoint] = []
+        self._cache_time: float = 0.0
+        self._cache_hours: int = 0
 
     def _fetch_day(self, year: int, month: int, day: int) -> List[PricePoint]:
         """Fetch prices - prøv hvakosterstrommen.no først, Nordpool direkte som fallback."""
@@ -82,7 +87,15 @@ class PriceFetcher:
         return points
 
     def get_prices(self, hours: int = 24) -> List[PricePoint]:
-        """Get prices for next N hours (today + tomorrow if available)."""
+        """Get prices for next N hours (today + tomorrow if available).
+        Cachet i 5 minutter for å unngå blokkerende HTTP-kall fra main loop.
+        """
+        now_mono = time.monotonic()
+        if (self._cache
+                and self._cache_hours == hours
+                and now_mono - self._cache_time < self._CACHE_TTL):
+            return self._cache
+
         now = datetime.now(OSLO_TZ)
         today = now.date()
         tomorrow = today + timedelta(days=1)
@@ -99,7 +112,12 @@ class PriceFetcher:
         # Filtrer: inkluder nåværende time (sammenlign kun på time-nivå)
         now_hour = now.replace(minute=0, second=0, microsecond=0)
         future = [p for p in points if p.timestamp >= now_hour]
-        return future[:hours]
+        result = future[:hours]
+
+        self._cache = result
+        self._cache_time = now_mono
+        self._cache_hours = hours
+        return result
 
     def get_current_price(self) -> Optional[PricePoint]:
         """Get price for current hour."""

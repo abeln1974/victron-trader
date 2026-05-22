@@ -67,6 +67,7 @@ class EnergyTrader:
         self._cached_grid_w: float = 0.0           # Grid-avlesning cachet per 10s-syklus
         self._cached_solar_w: float = 0.0          # Sol-avlesning cachet per 10s-syklus
         self._cached_bat_w: float = 0.0            # Batteri-avlesning cachet per 10s-syklus
+        self._effective_discharge_kw: float = 0.0  # Export-guard: faktisk utladeeffekt (ikke muterer power_kw)
 
     def _save_state(self):
         """Lagre current_action til disk så den overlever restart."""
@@ -244,8 +245,8 @@ class EnergyTrader:
                     battery_w = self.victron.get_battery_power() or 0
                     discharge_w = abs(self.current_action.power_kw) * 1000
                     # Export-guard: batteri lader i stedet for å utlade
-                    # Ved sol-reserve: senk setpoint til det batteriet faktisk kan levere
-                    # i stedet for å stoppe helt — sol kan delvis motvirke discharge
+                    # Bruker _effective_discharge_kw — muterer IKKE current_action.power_kw
+                    # for å unngå kumulativ degradering i _adjust_active_setpoint
                     if battery_w > -(discharge_w * 0.3):  # Batteri leverer < 30% av forventet
                         solar_w = self._cached_solar_w or self.victron.get_solar_power() or 0
                         net_kw = round((discharge_w - solar_w) / 1000, 1)
@@ -256,7 +257,7 @@ class EnergyTrader:
                                 f"senker setpoint {self.current_action.power_kw:.1f}→-{net_kw:.1f}kW"
                             )
                             self.victron.set_discharge_power(net_kw)
-                            self.current_action.power_kw = -net_kw
+                            self._effective_discharge_kw = net_kw  # Separat — ikke mutér power_kw
                         else:
                             logger.warning(
                                 f"Export-guard: Batteri {battery_w:.0f}W netto positiv (sol {solar_w:.0f}W) — stopper"
@@ -264,6 +265,7 @@ class EnergyTrader:
                             self.victron.stop_ess_control()
                             self.current_action = None
                             self._action_start_soc = None
+                            self._effective_discharge_kw = 0.0
 
             elif self.current_action and self.current_action.action != 'idle' and action_hour != now.hour:
                 self._log_completed_action(self.current_action)
@@ -551,7 +553,7 @@ class EnergyTrader:
 
     def _check_peak_shaving(self):
         try:
-            grid_w = self._get_grid_power()
+            grid_w = self._cached_grid_w or self._get_grid_power()
             soc = self.victron.get_soc()
             if grid_w is None or soc is None:
                 return

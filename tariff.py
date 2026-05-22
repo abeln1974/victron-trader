@@ -58,16 +58,20 @@ DAY_TARIFF_END       = int(os.getenv("DAY_TARIFF_END",             "22"))
 FIXED_PRICE_ORE = NORGESPRIS_CAP_ORE
 
 # Kapasitetstrinn (Føie AS 2026, kW-basert, inkl MVA)
+# Format: (øvre_grense_eksklusiv_kw, pris_nok_mnd)
+# peak_kw < øvre_grense → denne prisen gjelder
+# Eks: peak=1.5kW < 2 → 237.5 kr/mnd (Trinn 1: 0–1.99 kW)
+#      peak=9.0kW < 10 → 418.8 kr/mnd (Trinn 3: 5–9.99 kW)
 CAPACITY_TIERS = [
-    (2,    237.5),
-    (5,    293.8),
-    (10,   418.8),
-    (15,   662.5),
-    (20,   837.5),
-    (25,  1075.0),
-    (50,  1437.5),
-    (75,  2375.0),
-    (9999, 3000.0),
+    (2,    237.5),   # Trinn 1:  0– 1.99 kW
+    (5,    293.8),   # Trinn 2:  2– 4.99 kW
+    (10,   418.8),   # Trinn 3:  5– 9.99 kW  ← MÅL
+    (15,   662.5),   # Trinn 4: 10–14.99 kW  ← faktisk apr 2026
+    (20,   837.5),   # Trinn 5: 15–19.99 kW
+    (25,  1075.0),   # Trinn 6: 20–24.99 kW
+    (50,  1437.5),   # Trinn 7: 25–49.99 kW
+    (75,  2375.0),   # Trinn 8: 50–74.99 kW
+    (9999, 3000.0),  # Trinn 9: 75+ kW
 ]
 
 VAT = CONFIG.vat  # 1.25
