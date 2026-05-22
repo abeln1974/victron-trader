@@ -203,32 +203,6 @@ class Optimizer:
                     soc = min(soc + soc_change, self.max_soc)
                     continue
 
-            # SOL-RESERVE UTLADING: Gjør plass til sol — kun kveld/natt når sol er lav
-            # Logikk: tøm ned til charge_target_soc om kvelden/natten slik at sol
-            # fyller batteriet fra bunnen neste dag. IKKE kjør på dagtid mens sol
-            # allerede produserer — sol fyller selv uten at vi trenger å tømme.
-            # Prioritet: lavere enn lønnsom arbitrasje, høyere enn idle.
-            # Bruker lav effekt (2 kW) for å ikke forstyrre peak-shaving-kapasitet.
-            sol_lav = solar_kw < 1.0  # Sol produserer lite — kveld, natt eller overskyet
-            if (not storm_mode
-                    and sol_lav
-                    and solar_reserve_pct > 5.0
-                    and soc > charge_target_soc + 2.0):
-                avail_kwh = self.capacity * (soc - charge_target_soc) / 100
-                power = min(2.0, avail_kwh)  # Maks 2 kW — behold kapasitet til peak-shaving
-                if power > 0:
-                    reason = (f'Sol-reserve: gjør plass til sol '
-                              f'(SOC {soc:.0f}%→{charge_target_soc:.0f}%, '
-                              f'reserve {solar_reserve_pct:.0f}%, 2kW sakte)')
-                    actions.append(Action(
-                        timestamp=p.timestamp, action='discharge',
-                        power_kw=-power, expected_profit_nok=0.0,
-                        reason=reason
-                    ))
-                    soc_change = (power / self.efficiency / self.capacity) * 100
-                    soc = max(soc - soc_change, charge_target_soc)
-                    continue
-
             # SOL LADER: La Fronius gjore jobben
             if sol_lader and not is_night:
                 actions.append(Action(
