@@ -543,15 +543,20 @@ class EnergyTrader:
             grid_w = sum(self._grid_history) / len(self._grid_history)
             grid_kw = grid_w / 1000.0
 
-            # Ikke aktiver hvis snitt-grid er nær null — sol dekker allerede
-            if grid_kw < 0.3:
-                if self._self_consume_active:
-                    logger.info(f"Self-consume: snitt-grid {grid_kw:.2f}kW < 0.3kW — sol dekker, stopper")
+            # Hysterese: start ved >0.15kW, stopp kun ved <0.10kW — unngår jaging
+            start_threshold = 0.15
+            stop_threshold  = 0.10
+            if self._self_consume_active:
+                if grid_kw < stop_threshold:
+                    logger.info(f"Self-consume: snitt-grid {grid_kw:.2f}kW < {stop_threshold}kW — sol dekker, stopper")
                     self._self_consume_active = False
                     self._sc_last_setpoint_kw = 0.0
                     self._grid_history.clear()
                     self.victron.stop_ess_control()
-                return
+                    return
+            else:
+                if grid_kw < start_threshold:
+                    return
 
             # Beregn setpoint: dekk snitt-grid, aldri mer enn tilgjengelig kapasitet
             avail_kwh = max(0.0, self.optimizer.capacity * (soc - target) / 100)
