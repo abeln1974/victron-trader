@@ -169,6 +169,28 @@ class ProfitTracker:
             for row in rows
         ]
 
+    def get_daily_plan(self, limit: int = 48) -> list:
+        """Hent siste N daily_plan-rader for analyse/dashboard."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT timestamp, solar_kwh_forecast, solar_reserve_pct,
+                          charge_target_soc, storm_mode, soc_at_cycle, spot_nok_kwh
+                   FROM daily_plan ORDER BY timestamp DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+        return [
+            {
+                "timestamp": r[0],
+                "solar_kwh_forecast": r[1],
+                "solar_reserve_pct": r[2],
+                "charge_target_soc": r[3],
+                "storm_mode": bool(r[4]),
+                "soc_at_cycle": r[5],
+                "spot_nok_kwh": r[6],
+            }
+            for r in rows
+        ]
+
     def get_hourly_trades(self, hours: int = 24) -> list:
         """Hent trades gruppert per time med sum kjøpt/solgt."""
         cutoff = (datetime.now(OSLO_TZ) - timedelta(hours=hours)).isoformat()
