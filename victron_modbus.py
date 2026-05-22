@@ -422,7 +422,7 @@ class VictronModbus:
                 return None
             val = r.registers[0]
             raw = val - 65536 if val > 32767 else val
-            return float(-raw)  # Inverter: reg 842 negativ=lading → vi vil ha positiv=lading
+            return float(raw)  # reg 842: positiv=lading, negativ=utlading (verifisert mot VRM)
         except Exception:
             logger.debug("get_battery_power feilet")
             return None
