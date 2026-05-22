@@ -39,6 +39,35 @@ class ProfitTracker:
                     net_profit_nok REAL NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_plan (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    solar_kwh_forecast REAL NOT NULL,
+                    solar_reserve_pct REAL NOT NULL,
+                    charge_target_soc REAL NOT NULL,
+                    storm_mode INTEGER NOT NULL,
+                    soc_at_cycle REAL,
+                    spot_nok_kwh REAL
+                )
+            """)
+            conn.commit()
+
+    def log_plan(self, solar_kwh_forecast: float, solar_reserve_pct: float,
+                 charge_target_soc: float, storm_mode: bool,
+                 soc: float = None, spot_nok_kwh: float = None):
+        """Logg optimizer-plan ved hvert trade-cycle for etteranalyse."""
+        with self._conn() as conn:
+            conn.execute(
+                """INSERT INTO daily_plan
+                   (timestamp, solar_kwh_forecast, solar_reserve_pct,
+                    charge_target_soc, storm_mode, soc_at_cycle, spot_nok_kwh)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (datetime.now(OSLO_TZ).isoformat(),
+                 solar_kwh_forecast, solar_reserve_pct,
+                 charge_target_soc, int(storm_mode),
+                 soc, spot_nok_kwh)
+            )
             conn.commit()
 
     def _load_last_buy_price(self) -> float:

@@ -4,6 +4,7 @@ import sys
 import time
 import signal
 import logging
+import logging.handlers
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -21,6 +22,21 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logging.Formatter.converter = lambda *args: datetime.now(OSLO_TZ).timetuple()
+
+# Skriv også til fil — overlever container-restart (montert volum)
+_log_dir = os.path.join(os.path.dirname(os.getenv("DB_PATH", "./data/profit.db")), "..", "logs")
+_log_dir = os.path.normpath(_log_dir)
+os.makedirs(_log_dir, exist_ok=True)
+_file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(_log_dir, "trader.log"),
+    maxBytes=5 * 1024 * 1024,  # 5 MB per fil
+    backupCount=7,             # 7 filer = ~35 MB = ~1 uke
+    encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_file_handler.formatter.converter = lambda *args: datetime.now(OSLO_TZ).timetuple()
+logging.getLogger().addHandler(_file_handler)
+
 logger = logging.getLogger(__name__)
 
 
@@ -352,6 +368,22 @@ class EnergyTrader:
             self._charge_target_soc = charge_target_soc  # Cache for _enforce_max_soc
             logger.info(f"Action: {action.action} @ {action.power_kw:.1f}kW | {action.reason}")
             logger.info(f"Lademål: {charge_target_soc:.1f}% SOC")
+
+            # Logg plan til DB for etteranalyse (verifiser sol-prognose vs virkelighet)
+            try:
+                solar_kwh_fc = self._get_solar_kwh_cached()
+                storm_now, _ = self._get_storm_info()
+                solar_reserve = CONFIG.max_soc - charge_target_soc if not storm_now else 0.0
+                self.tracker.log_plan(
+                    solar_kwh_forecast=solar_kwh_fc,
+                    solar_reserve_pct=round(solar_reserve, 1),
+                    charge_target_soc=round(charge_target_soc, 1),
+                    storm_mode=storm_now,
+                    soc=soc,
+                    spot_nok_kwh=current.price_nok_kwh
+                )
+            except Exception:
+                pass
 
             prev_action = self.current_action
             # Hent fersk SOC rett før execute for å unngå utdatert data
