@@ -590,36 +590,31 @@ class EnergyTrader:
                 if grid_kw < start_threshold:
                     return
 
-            # Beregn setpoint: dekk snitt-grid, aldri mer enn tilgjengelig kapasitet
+            # Beregn setpoint: sett grid-setpoint til 0W så Victron bruker batteri for resten.
+            # Med AC-koblet sol (Fronius) er riktig metode setpoint=0W (ikke negativt/eksport).
+            # Negativt setpoint = "eksporter til nett", ikke "utlad batteri".
+            # Med setpoint=0W sier vi "importer 0W fra grid" — Victron bruker batteri for
+            # alt forbruk utover hva sol dekker direkte.
             avail_kwh = max(0.0, self.optimizer.capacity * (soc - target) / 100)
             if avail_kwh <= 0:
                 return
 
-            discharge_kw = min(grid_kw, CONFIG.battery_max_discharge_kw)
-            discharge_kw = round(discharge_kw, 1)
-
-            if discharge_kw < 0.2:
+            if grid_kw < 0.2:
                 return
 
-            # Dead-band: oppdater kun ved >0.15 kW (150W) endring fra forrige setpoint
-            setpoint_changed = abs(discharge_kw - self._sc_last_setpoint_kw) > 0.15
+            # Setpoint = 0W: Victron forsøker å holde 0W grid-import → batteri dekker resten
+            target_grid_kw = 0.0
 
+            # Dead-band: oppdater kun dersom vi ikke allerede er aktiv med samme setpoint
             if not self._self_consume_active:
                 logger.info(
                     f"Self-consume START: SOC {soc:.1f}% > mål {target:.1f}%, "
-                    f"snitt-grid {grid_kw:.1f}kW → setpoint -{discharge_kw:.1f}kW"
+                    f"grid {grid_kw:.1f}kW → setpoint 0W (batteri dekker)"
                 )
                 self._self_consume_active = True
-                self._sc_last_setpoint_kw = discharge_kw
-                self.victron.set_discharge_power(discharge_kw)
-            elif setpoint_changed:
-                logger.info(
-                    f"Self-consume: grid {grid_kw:.1f}kW → setpoint {self._sc_last_setpoint_kw:.1f}→{discharge_kw:.1f}kW "
-                    f"(SOC {soc:.1f}%)"
-                )
-                self._sc_last_setpoint_kw = discharge_kw
-                self.victron.set_discharge_power(discharge_kw)
-            # else: ingen endring — keepalive holder setpoint aktiv via send_keepalive()
+                self._sc_last_setpoint_kw = target_grid_kw
+                self.victron.set_grid_setpoint(int(target_grid_kw * 1000))
+            # else: keepalive holder setpoint=0W aktiv via send_keepalive()
 
         except Exception as e:
             logger.debug(f"_check_self_consume feilet: {e}")
