@@ -340,7 +340,11 @@ class VictronModbus:
                 self.client.write_register(
                     address=self.REG_HUB4_MODE, value=self.HUB4_MODE_OPTIMIZED,
                     device_id=self.UNIT_SYSTEM)
-                logger.info("Hub4Mode → 2 (Optimized) — planlagt shutdown, GX overtar")
+                # Nullstill DVCC max charge current (-1 = ingen grense)
+                self.client.write_register(
+                    address=self.REG_MAX_CHARGE_AMP, value=65535,  # -1 signed16
+                    device_id=self.UNIT_SYSTEM)
+                logger.info("Hub4Mode → 2 (Optimized), DVCC → ingen grense — planlagt shutdown, GX overtar")
             except Exception:
                 pass
         return True
