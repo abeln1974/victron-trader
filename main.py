@@ -290,14 +290,15 @@ class EnergyTrader:
         actual_kwh = 0.0
         kwh_source = "soc-delta"
         # Foretrekk SmartShunt energitellere (reg 309/310) over SOC-delta
+        # compute_counter_delta() håndterer uint16-overflow (wrapper ved 6553.5 kWh)
         end_counters = self.victron.get_energy_counters()
         if end_counters and self._action_start_counters:
             start_dis, start_chg = self._action_start_counters
             end_dis, end_chg = end_counters
             if act == 'discharge':
-                actual_kwh = max(0.0, end_dis - start_dis)
+                actual_kwh = self.victron.compute_counter_delta(start_dis, end_dis)
             else:
-                actual_kwh = max(0.0, end_chg - start_chg)
+                actual_kwh = self.victron.compute_counter_delta(start_chg, end_chg)
             kwh_source = "smartshunt"
             # Fallback til SOC-delta hvis SmartShunt gir 0 (reg 310 teller ikke alltid)
             if actual_kwh < 0.05 and self._action_start_soc is not None:
@@ -574,6 +575,11 @@ class EnergyTrader:
                 # IKKE returner her - tillat peak shaving selv under MIN_SOC hvis batteriet har kapasitet
 
             if grid_kw <= peak_kw + 0.3:
+                # Grid OK — nullstill peak_shave action så _control_setpoint kan ta over igjen
+                if self.current_action and self.current_action.action == 'peak_shave':
+                    logger.info(f"Peak-shave ferdig: grid {grid_kw:.1f}kW ≤ {peak_kw + 0.3:.1f}kW — stopper")
+                    self.victron.stop_ess_control()
+                    self.current_action = None
                 return
 
             if self.current_action and self.current_action.action == 'charge':
@@ -681,9 +687,13 @@ class EnergyTrader:
 
     def _log_status(self):
         soc   = self.victron.get_soc()
-        grid  = self._cached_grid_w if self._cached_grid_w != 0 else (self._get_grid_power() or 0)
-        solar = self._cached_solar_w if self._cached_solar_w != 0 else (self.victron.get_solar_power() or 0)
-        bat   = self._cached_bat_w  if self._cached_bat_w  != 0 else (self.victron.get_battery_power() or 0)
+        # Bruk cachet verdi hvis den er populert (satt i main-loop hvert 10s).
+        # Fallback til live avlesning. Merk: != 0 er feil guard siden 0W er gyldig —
+        # vi bruker _last_peak_shave > 0 som proxy for om cachen er initialisert.
+        cache_ready = self._cached_grid_w != 0 or self._cached_solar_w != 0
+        grid  = self._cached_grid_w  if cache_ready else (self._get_grid_power() or 0)
+        solar = self._cached_solar_w if cache_ready else (self.victron.get_solar_power() or 0)
+        bat   = self._cached_bat_w   if cache_ready else (self.victron.get_battery_power() or 0)
 
         # Beregn forbruk: Sol + Grid (inn) - Bat (lading) = Forbruk
         # bat positiv=lading, negativ=utlading
@@ -804,4 +814,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
