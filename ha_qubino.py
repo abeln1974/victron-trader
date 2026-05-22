@@ -188,6 +188,7 @@ class EVCSController:
         self._peak_kw = CONFIG.peak_limit_kw         # 9.5 kW
         self._cache: dict = {}
         self._last_fetch = 0.0
+        self._last_warn_time = 0.0        # Throttle feil-logging til maks 1/min
         self._last_current_a: int = -1  # -1 = ukjent ved oppstart, synkroniseres ved første fetch
 
     # ------------------------------------------------------------------ #
@@ -196,9 +197,12 @@ class EVCSController:
 
     def _fetch(self) -> bool:
         """Hent EVCS-states fra HA (maks hvert 10s)."""
-        import time
-        if time.monotonic() - self._last_fetch < 10:
+        import time as _time
+        now = _time.monotonic()
+        if now - self._last_fetch < 10:
             return True
+        # Oppdater alltid _last_fetch — også ved feil — for å unngå spam mot HA
+        self._last_fetch = now
         wanted = {
             f"binary_sensor.{self._prefix}_connected",
             f"sensor.{self._prefix}_power",
@@ -213,7 +217,6 @@ class EVCSController:
             if r.status_code == 200:
                 self._cache = {s["entity_id"]: s["state"]
                                for s in r.json() if s["entity_id"] in wanted}
-                self._last_fetch = __import__("time").monotonic()
                 # Synkroniser _last_current_a fra faktisk EVCS-tilstand ved oppstart
                 if self._last_current_a == -1:
                     try:
@@ -223,6 +226,11 @@ class EVCSController:
                     except (ValueError, TypeError):
                         self._last_current_a = 0
                 return True
+            else:
+                import time as _t
+                if _t.monotonic() - self._last_warn_time >= 60:
+                    logger.warning(f"HA /api/states {r.status_code} — EVCS/Qubino utilgjengelig")
+                    self._last_warn_time = _t.monotonic()
         except Exception as e:
             logger.debug(f"EVCS fetch feil: {e}")
         return False
