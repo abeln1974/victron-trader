@@ -392,11 +392,18 @@ class VictronModbus:
             logger.debug(f"get_soc feilet: {e}")
         return None
 
+    # SmartShunt reg 309/310 er uint16 → max 6553.5 kWh før overflow til 0.
+    # Vi sporer forrige verdi for å detektere wrap og korrigere delta i _log_completed_action.
+    _COUNTER_MAX_KWH = 6553.5  # uint16 max / 10
+    _prev_counters: Optional[tuple] = None  # (discharged_kwh, charged_kwh) fra forrige avlesning
+
     def get_energy_counters(self) -> Optional[tuple]:
         """Les SmartShunt akkumulerte energitellere (reg 309/310, scale /10).
 
         Returnerer (discharged_kwh, charged_kwh) eller None ved feil.
         Delta mellom to avlesninger gir faktisk kWh inn/ut — mer nøyaktig enn SOC-delta.
+        Registrene er uint16 (max 6553.5 kWh) og wrapper til 0 ved overflow — se
+        compute_counter_delta() for korrekt delta-beregning med wrap-deteksjon.
         """
         try:
             r_dis = self.client.read_holding_registers(
@@ -405,10 +412,33 @@ class VictronModbus:
                 address=self.REG_CHARGED_ENERGY, count=1, device_id=self.UNIT_BATTERY)
             if (r_dis and not r_dis.isError() and
                     r_chg and not r_chg.isError()):
-                return (r_dis.registers[0] / 10.0, r_chg.registers[0] / 10.0)
+                current = (r_dis.registers[0] / 10.0, r_chg.registers[0] / 10.0)
+                self._prev_counters = current
+                return current
         except Exception as e:
             logger.debug(f"get_energy_counters feilet: {e}")
         return None
+
+    @classmethod
+    def compute_counter_delta(cls, start: float, end: float) -> float:
+        """Beregn korrekt delta mellom to uint16-tellerverdier med wrap-deteksjon.
+
+        SmartShunt reg 309/310 wrapper fra 6553.5 → 0.0 ved overflow.
+        Ved wrap: delta = (MAX - start) + end
+        Ved normal: delta = end - start
+
+        Wrap detekteres når end < start med mer enn 100 kWh margin
+        (normalt drift vil aldri gi >100 kWh per time).
+        """
+        delta = end - start
+        if delta < -100.0:
+            # Overflow: teller har wrappet rundt
+            delta = (cls._COUNTER_MAX_KWH - start) + end
+            logger.warning(
+                f"SmartShunt teller-overflow detektert: {start:.1f}→{end:.1f} kWh "
+                f"(korrigert delta={delta:.2f} kWh)"
+            )
+        return max(0.0, delta)
 
     def get_battery_power(self) -> Optional[float]:
         """Returnerer batterieffekt i Watt (positiv=lading, negativ=utlading).
@@ -523,3 +553,4 @@ if __name__ == "__main__":
     else:
         print(f"Failed to connect to {host}:502")
         print("Sjekk at Modbus-TCP er aktivert på Cerbo GX")
+
