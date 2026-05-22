@@ -340,6 +340,15 @@ class EnergyTrader:
         now_hour = datetime.now(OSLO_TZ).hour
         is_daytime = 6 <= now_hour < 22
 
+        bat_w   = self._cached_bat_w
+        load_w  = solar_w + grid_w  # faktisk forbruk (W)
+
+        logger.debug(
+            f"[ctrl] SOC={soc:.1f}% sol={solar_w:.0f}W grid={grid_w:+.0f}W "
+            f"bat={bat_w:+.0f}W forbruk={load_w:.0f}W target={target:.1f}% "
+            f"action={self.current_action.action if self.current_action else 'none'}"
+        )
+
         # --- DVCC: stopp lading når SOC >= lademål (uavhengig av setpoint) ---
         if soc >= target and not self._dvcc_charging_stopped:
             logger.info(f"SOC {soc:.1f}% >= lademål {target:.1f}% — DVCC=0A (ingen lading)")
@@ -354,24 +363,27 @@ class EnergyTrader:
         _, effective_min_soc = self._get_storm_info()
         if soc <= effective_min_soc:
             if self.current_action and self.current_action.action == 'discharge':
-                logger.warning(f"MIN_SOC nødstopp: SOC {soc:.1f}% — stopper utlading")
+                logger.warning(f"[P1] MIN_SOC nødstopp: SOC {soc:.1f}% <= {effective_min_soc}% — stopper utlading")
                 self.victron.stop_ess_control()
                 self.current_action = None
-            return  # Ikke self-consume under MIN_SOC heller
+            else:
+                logger.debug(f"[P1] SOC {soc:.1f}% <= min {effective_min_soc}% — idle, ingen self-consume")
+            return
 
         # --- 2. Peak-shaving (håndteres av _check_peak_shaving, ikke her) ---
         if self.current_action and self.current_action.action == 'peak_shave':
-            return  # Peak-shave setter eget setpoint
+            logger.debug(f"[P2] Peak-shave aktiv ({self.current_action.power_kw:.1f}kW) — ingen override")
+            return
 
         # --- 3. Fullt batteri: eksporter all sol til nett ---
         if soc >= CONFIG.max_soc and solar_w > 200:
             if self.current_action and self.current_action.action in ('charge', 'discharge'):
-                return  # Arbitrasje har prioritet
+                logger.debug(f"[P3] Fullt batteri men arbitrasje ({self.current_action.action}) har prioritet")
+                return
             new_setpoint = max(-int(solar_w), -int(CONFIG.battery_max_discharge_kw * 1000))
-            load_w = solar_w + grid_w
             logger.info(
-                f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W forbruk {load_w:.0f}W "
-                f"grid {grid_w:+.0f}W → setpoint {new_setpoint}W"
+                f"[P3] Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W forbruk {load_w:.0f}W "
+                f"grid {grid_w:+.0f}W bat {bat_w:+.0f}W → setpoint {new_setpoint}W"
             )
             self.victron.set_grid_setpoint(new_setpoint)
             self._self_consume_active = False
@@ -379,24 +391,32 @@ class EnergyTrader:
 
         # --- 4+5. Arbitrasje (charge/discharge fra trade-cycle) ---
         if self.current_action and self.current_action.action in ('charge', 'discharge'):
+            logger.debug(
+                f"[P4/5] Arbitrasje {self.current_action.action} {self.current_action.power_kw:.1f}kW aktiv "
+                f"| {self.current_action.reason}"
+            )
             self._self_consume_active = False
-            return  # Trade-cycle styrer setpointet
+            return
 
         # --- 6. Self-consume: batteri dekker husforbruk ---
         if not is_daytime:
             if self._self_consume_active:
-                logger.info("Self-consume: natt — stopper")
+                logger.info("[P6] Self-consume: natt — stopper, beholder batteri til sol")
                 self._self_consume_active = False
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
+            else:
+                logger.debug(f"[P6] Natt ({now_hour}h) — idle")
             return
 
         if soc <= target + 1.0:
             if self._self_consume_active:
-                logger.info(f"Self-consume: SOC {soc:.1f}% nede på lademål {target:.1f}% — stopper")
+                logger.info(f"[P6] Self-consume: SOC {soc:.1f}% nede på lademål {target:.1f}% — stopper")
                 self._self_consume_active = False
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
+            else:
+                logger.debug(f"[P6] SOC {soc:.1f}% <= lademål {target:.1f}% + 1% — idle")
             return
 
         self._grid_history.append(grid_w)
@@ -406,20 +426,26 @@ class EnergyTrader:
 
         if self._self_consume_active:
             if avg_grid_kw < 0.10:
-                logger.info(f"Self-consume: grid {avg_grid_kw:.2f}kW < 0.10kW — sol dekker, stopper")
+                logger.info(f"[P6] Self-consume: snitt-grid {avg_grid_kw:.2f}kW < 0.10kW — sol dekker, stopper")
                 self._self_consume_active = False
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
-            # else: keepalive holder setpoint=0W
+            else:
+                logger.debug(
+                    f"[P6] Self-consume aktiv: grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W "
+                    f"bat {bat_w:+.0f}W SOC {soc:.1f}% — keepalive=0W"
+                )
             return
 
         if avg_grid_kw >= 0.15:
             logger.info(
-                f"Self-consume START: SOC {soc:.1f}% > mål {target:.1f}%, "
-                f"grid {avg_grid_kw:.2f}kW → setpoint 0W"
+                f"[P6] Self-consume START: SOC {soc:.1f}% > mål {target:.1f}%, "
+                f"grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W → setpoint 0W"
             )
             self._self_consume_active = True
             self.victron.set_grid_setpoint(0)
+        else:
+            logger.debug(f"[P6] Grid {avg_grid_kw:.2f}kW < 0.15kW — sol dekker forbruket, idle")
 
     def _execute_trade_cycle(self):
         try:
