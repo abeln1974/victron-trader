@@ -649,9 +649,31 @@ class EnergyTrader:
 
     def _log_status(self):
         soc   = self.victron.get_soc()
-        grid  = self._get_grid_power()
-        solar = self.victron.get_solar_power()
-        logger.info(f"Status: SOC={soc}% Grid={grid}W Sol={solar}W")
+        grid  = self._cached_grid_w if self._cached_grid_w != 0 else (self._get_grid_power() or 0)
+        solar = self._cached_solar_w if self._cached_solar_w != 0 else (self.victron.get_solar_power() or 0)
+        bat   = self._cached_bat_w  if self._cached_bat_w  != 0 else (self.victron.get_battery_power() or 0)
+
+        # Beregn forbruk: Sol + Grid (inn) - Bat (lading) = Forbruk
+        # bat positiv=lading, negativ=utlading
+        forbruk = solar + grid - bat  # W
+
+        # Modus-streng
+        if self.current_action and self.current_action.action != 'idle':
+            modus = f"{self.current_action.action}({self.current_action.power_kw:.1f}kW)"
+        elif self._self_consume_active:
+            modus = f"self-consume(-{self._sc_last_setpoint_kw:.1f}kW)"
+        elif self._dvcc_charging_stopped:
+            modus = "DVCC-stopp(sol-eksport)"
+        else:
+            modus = "idle"
+
+        target = self._charge_target_soc
+        logger.info(
+            f"Status: SOC={soc:.1f}%/{target:.0f}% "
+            f"Grid={grid/1000:.2f}kW Sol={solar/1000:.2f}kW "
+            f"Bat={bat/1000:+.2f}kW Forbruk={forbruk/1000:.2f}kW "
+            f"Modus={modus}"
+        )
 
     def _adjust_active_setpoint(self):
         """Justerer discharge/charge-effekt midt i timen basert på gjenværende SOC og tid.
