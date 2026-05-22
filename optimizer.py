@@ -203,13 +203,15 @@ class Optimizer:
                     soc = min(soc + soc_change, self.max_soc)
                     continue
 
-            # SOL-RESERVE UTLADING: Gjør plass til sol — hele dagen (06-22)
-            # Utlad ned til charge_target_soc hvis SOC er over målet og sol-prognose tilsier det.
+            # SOL-RESERVE UTLADING: Gjør plass til sol — kun kveld/natt når sol er lav
+            # Logikk: tøm ned til charge_target_soc om kvelden/natten slik at sol
+            # fyller batteriet fra bunnen neste dag. IKKE kjør på dagtid mens sol
+            # allerede produserer — sol fyller selv uten at vi trenger å tømme.
             # Prioritet: lavere enn lønnsom arbitrasje, høyere enn idle.
             # Bruker lav effekt (2 kW) for å ikke forstyrre peak-shaving-kapasitet.
-            # Stopper ved charge_target_soc — sol fyller opp resten.
+            sol_lav = solar_kw < 1.0  # Sol produserer lite — kveld, natt eller overskyet
             if (not storm_mode
-                    and not is_night
+                    and sol_lav
                     and solar_reserve_pct > 5.0
                     and soc > charge_target_soc + 2.0):
                 avail_kwh = self.capacity * (soc - charge_target_soc) / 100
