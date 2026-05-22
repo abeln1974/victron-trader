@@ -483,12 +483,18 @@ function setModePill(action) {
   el.textContent = cfg.label;
 }
 
-// Flow line animation
+// Flow line animation — bruker style direkte da SVG class-arv er upålitelig
 function setFlow(id, active, reverse) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.setAttribute('class', active ? (reverse ? 'flow-dash-rev' : 'flow-dash') : '');
   el.style.opacity = active ? '1' : '0.12';
+  if (active) {
+    el.style.strokeDasharray = '6 4';
+    el.style.animation = reverse ? 'fdash-rev 1.2s linear infinite' : 'fdash 1.2s linear infinite';
+  } else {
+    el.style.strokeDasharray = '4 4';
+    el.style.animation = 'none';
+  }
 }
 
 // Price bars
@@ -675,7 +681,10 @@ async function fetchAll() {
   renderPriceBars(prices);
   if(solar.today_profile){
     renderSolarBars(solar.today_profile);
-    document.getElementById('solarTodayKwh').textContent=(solar.kwh_today||0)+' kWh i dag';
+    // Beregn kun faktisk produsert hittil (timer <= nå)
+    const nowH = new Date().getHours();
+    const producedSoFar = solar.today_profile.filter(p=>p.hour<=nowH).reduce((s,p)=>s+p.kw,0);
+    document.getElementById('solarTodayKwh').textContent=producedSoFar.toFixed(1)+' kWh hittil / '+solar.kwh_today+' kWh prognose';
   }
   renderPlan(plan);
   renderTrades(trades);
