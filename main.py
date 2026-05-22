@@ -68,6 +68,7 @@ class EnergyTrader:
         self._cached_grid_w: float = 0.0           # Grid-avlesning cachet per 10s-syklus
         self._cached_solar_w: float = 0.0          # Sol-avlesning cachet per 10s-syklus
         self._cached_bat_w: float = 0.0            # Batteri-avlesning cachet per 10s-syklus
+        self._fullbat_setpoint_w: int = 0          # Dynamisk setpoint ved fullt batteri
 
     def _save_state(self):
         """Lagre current_action til disk så den overlever restart."""
@@ -349,17 +350,20 @@ class EnergyTrader:
             if self.current_action and self.current_action.action in ('charge', 'discharge', 'peak_shave'):
                 return
             solar_w = self._cached_solar_w
-            grid_w  = self._cached_grid_w
+            grid_w  = self._cached_grid_w    # positiv=import, negativ=eksport
             load_w  = solar_w + grid_w       # faktisk forbruk
             if solar_w > 200:
-                # Eksporter sol + litt ekstra (forbruk) for å tvinge batteri-utlading
-                # Setpoint = -(solar_w): all sol til nett, forbruk tas fra batteri
-                export_setpoint_w = max(-int(solar_w), -int(CONFIG.battery_max_discharge_kw * 1000))
+                # Setpoint = -load_w: batteri dekker forbruk, all sol eksporteres til nett.
+                # load_w = solar_w + grid_w (faktisk forbruk inkl. EVCS)
+                # Clamping: aldri mer enn max_discharge, aldri positivt (aldri importer)
+                new_setpoint = max(-int(load_w), -int(CONFIG.battery_max_discharge_kw * 1000))
+                new_setpoint = min(new_setpoint, 0)
+                self._fullbat_setpoint_w = new_setpoint
                 logger.info(
-                    f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W, forbruk {load_w:.0f}W "
-                    f"— eksporterer all sol ({solar_w:.0f}W) til nett, forbruk fra batteri"
+                    f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W forbruk {load_w:.0f}W "
+                    f"grid {grid_w:+.0f}W → setpoint {new_setpoint}W"
                 )
-                self.victron.set_grid_setpoint(export_setpoint_w)
+                self.victron.set_grid_setpoint(new_setpoint)
 
     def _execute_trade_cycle(self):
         try:
