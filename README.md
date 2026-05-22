@@ -42,7 +42,7 @@ Peak-shaving  >  enforce_max_soc  >  self-consume
 
 | Tilstand | Setpoint | Trigger |
 |----------|----------|---------|
-| **Oppstart** | 0W, DVCC frigjort | — |
+| **Oppstart** | 0W, DVCC frigjort (−1A) | `start()` kaller `set_max_charge_current(-1)` |
 | **Natt-lading** | +kW | Billig natttariff, SOC < charge_target_soc |
 | **Sol-reserve utlading** | −2 kW | SOC > charge_target_soc + 2%, dagtid, sol prognose tilsier det |
 | **Arbitrasje utlading** | −kW | Spot høy nok (terskel MIN_PRICE_DIFF_NOK) |
@@ -134,8 +134,7 @@ NMC-kjemi degraderer ved langvarig høy SOC. Konfigurert for lang levetid:
 - **Float**: 56.80V (3.55V/celle)
 - **Repeated absorption**: hvert 30. døgn
 
-> ⚠️ DVCC reg 2705 = 0A virker **ikke** for AC-koblet Fronius Primo (kun DC MPPT).
-> Ved høy sol kan SOC krysse 90% kortvarig (Absorption ~10 min). BMS (57.4V) beskytter mot overlading.
+> ✅ DVCC reg 2705 = 0A fungerer for AC-koblet Fronius Primo på dette systemet (2× MultiPlus-II parallell, verifisert 2026-05-22). MultiPlus reduserer absorption-kapasiteten slik at Fronius-overskudd eksporteres til nett i stedet for å gå inn i batteriet.
 
 ## Data og lagring
 
