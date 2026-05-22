@@ -317,11 +317,13 @@ class EnergyTrader:
             logger.info(f"Handling ferdig: {act} {actual_kwh:.2f} kWh [{kwh_source}] (SOC {self._action_start_soc:.1f}%→{end_soc:.1f}%)")
 
     def _enforce_max_soc(self):
-        """Håndhev max SOC via DVCC (kun ladestrøm-begrensning, ikke setpoint).
+        """Håndhev max SOC via DVCC + aktiv eksport ved full batteri.
 
         Bruker _charge_target_soc fra optimizer (90% - sol_reserve) som grense.
         Ved SOC >= target: DVCC=0A — stopper Fronius fra å lade batteriet videre.
-        Overstyrer IKKE ESS-setpointet — self-consume/discharge kan fortsette.
+
+        Ved SOC >= max_soc (90%) og sol > forbruk: sett negativt setpoint lik
+        overskuddet slik at Fronius eksporterer til nett i stedet for å spille i BMS.
         """
         soc = self.victron.get_soc()
         if soc is None:
@@ -331,12 +333,30 @@ class EnergyTrader:
 
         if soc >= target and not self._dvcc_charging_stopped:
             logger.info(f"SOC {soc:.1f}% >= lademål {target:.1f}% — DVCC=0A (ingen lading)")
-            self.victron.set_max_charge_current(0)  # Bare DVCC — ikke stop_ess_control
+            self.victron.set_max_charge_current(0)
             self._dvcc_charging_stopped = True
         elif soc < target - 1.0 and self._dvcc_charging_stopped:
             logger.info(f"SOC {soc:.1f}% < {target - 1.0:.1f}% — DVCC frigjort, lading tillatt igjen")
             self.victron.set_max_charge_current(-1)
             self._dvcc_charging_stopped = False
+
+        # Aktiv overskuddseksport: batteri fullt (>= max_soc) og sol > forbruk
+        # Setpoint negativt = eksporter til nett. Mål: grid → 0W.
+        # Ikke aktiver hvis arbitrasje/peak-shave allerede styrer setpointet.
+        if soc >= CONFIG.max_soc:
+            if self.current_action and self.current_action.action in ('charge', 'discharge', 'peak_shave'):
+                return
+            solar_w = self._cached_solar_w
+            grid_w  = self._cached_grid_w   # positiv = import, negativ = eksport
+            load_w  = solar_w + grid_w       # faktisk forbruk
+            surplus_w = solar_w - load_w     # = -grid_w (overskudd over forbruk)
+            if surplus_w > 200:
+                export_setpoint_w = max(-int(surplus_w), -int(CONFIG.battery_max_discharge_kw * 1000))
+                logger.info(
+                    f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W > forbruk {load_w:.0f}W "
+                    f"— eksporterer overskudd {surplus_w:.0f}W til nett"
+                )
+                self.victron.set_grid_setpoint(export_setpoint_w)
 
     def _execute_trade_cycle(self):
         try:
