@@ -353,11 +353,10 @@ class EnergyTrader:
             grid_w  = self._cached_grid_w    # positiv=import, negativ=eksport
             load_w  = solar_w + grid_w       # faktisk forbruk
             if solar_w > 200:
-                # Setpoint = -load_w: batteri dekker forbruk, all sol eksporteres til nett.
-                # load_w = solar_w + grid_w (faktisk forbruk inkl. EVCS)
-                # Clamping: aldri mer enn max_discharge, aldri positivt (aldri importer)
-                new_setpoint = max(-int(load_w), -int(CONFIG.battery_max_discharge_kw * 1000))
-                new_setpoint = min(new_setpoint, 0)
+                # Setpoint = -solar_w: tving Victron/MultiPlus til å eksportere tilsvarende
+                # all sol-produksjon. Grid = forbruk (import), batteri = 0 (verken lad/utlad).
+                # Merk: load_w er unøyaktig pga EVCS på AC-ut måles ulikt av Fronius/Victron.
+                new_setpoint = max(-int(solar_w), -int(CONFIG.battery_max_discharge_kw * 1000))
                 self._fullbat_setpoint_w = new_setpoint
                 logger.info(
                     f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W forbruk {load_w:.0f}W "
