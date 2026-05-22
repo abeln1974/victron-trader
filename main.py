@@ -340,21 +340,24 @@ class EnergyTrader:
             self.victron.set_max_charge_current(-1)
             self._dvcc_charging_stopped = False
 
-        # Aktiv overskuddseksport: batteri fullt (>= max_soc) og sol > forbruk
-        # Setpoint negativt = eksporter til nett. Mål: grid → 0W.
+        # Aktiv overskuddseksport: batteri fullt (>= max_soc)
+        # Sett setpoint = -(solar_w) slik at all solenergi eksporteres til nett
+        # og ingen går inn i batteriet. Victron vil da trekke fra batteri for å
+        # dekke forbruk → SOC synker sakte tilbake mot max_soc.
         # Ikke aktiver hvis arbitrasje/peak-shave allerede styrer setpointet.
         if soc >= CONFIG.max_soc:
             if self.current_action and self.current_action.action in ('charge', 'discharge', 'peak_shave'):
                 return
             solar_w = self._cached_solar_w
-            grid_w  = self._cached_grid_w   # positiv = import, negativ = eksport
+            grid_w  = self._cached_grid_w
             load_w  = solar_w + grid_w       # faktisk forbruk
-            surplus_w = solar_w - load_w     # = -grid_w (overskudd over forbruk)
-            if surplus_w > 200:
-                export_setpoint_w = max(-int(surplus_w), -int(CONFIG.battery_max_discharge_kw * 1000))
+            if solar_w > 200:
+                # Eksporter sol + litt ekstra (forbruk) for å tvinge batteri-utlading
+                # Setpoint = -(solar_w): all sol til nett, forbruk tas fra batteri
+                export_setpoint_w = max(-int(solar_w), -int(CONFIG.battery_max_discharge_kw * 1000))
                 logger.info(
-                    f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W > forbruk {load_w:.0f}W "
-                    f"— eksporterer overskudd {surplus_w:.0f}W til nett"
+                    f"Fullt batteri ({soc:.1f}%): sol {solar_w:.0f}W, forbruk {load_w:.0f}W "
+                    f"— eksporterer all sol ({solar_w:.0f}W) til nett, forbruk fra batteri"
                 )
                 self.victron.set_grid_setpoint(export_setpoint_w)
 
