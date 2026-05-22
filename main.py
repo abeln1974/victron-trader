@@ -567,8 +567,13 @@ class EnergyTrader:
                     self.victron.stop_ess_control()
                 return
 
-            # Ikke overstyr aktiv arbitrasje eller lading fra trade-syklusen
-            if self.current_action and self.current_action.action in ('charge', 'discharge', 'peak_shave'):
+            # Ikke overstyr aktiv arbitrasje/lading — men sol-reserve discharge er OK
+            # Sol-reserve er bare "gjør plass til sol", self-consume dekker huset bedre
+            is_solar_reserve = (self.current_action and
+                                'Sol-reserve' in (self.current_action.reason or ''))
+            if (self.current_action
+                    and self.current_action.action in ('charge', 'discharge', 'peak_shave')
+                    and not is_solar_reserve):
                 if self._self_consume_active:
                     logger.info("Self-consume: pause — arbitrasje/peak-shave aktiv")
                     self._self_consume_active = False
@@ -751,10 +756,15 @@ class EnergyTrader:
         opt = self.optimizer
 
         if self.current_action.action == 'discharge':
-            avail_kwh = max(0.0, opt.capacity * (soc - effective_min_soc) / 100 - opt.peak_reserve)
+            # Sol-reserve discharge: fast 2kW, ikke eskalér
+            is_solar_reserve = 'Sol-reserve' in (self.current_action.reason or '')
+            if is_solar_reserve:
+                return
+            floor_soc = effective_min_soc
+            avail_kwh = max(0.0, opt.capacity * (soc - floor_soc) / 100 - opt.peak_reserve)
             if avail_kwh <= 0:
                 logger.info(
-                    f"Setpoint-justering: SOC {soc:.1f}% ved min ({effective_min_soc:.0f}%) — stopper utlading"
+                    f"Setpoint-justering: SOC {soc:.1f}% ved mål ({floor_soc:.0f}%) — stopper utlading"
                 )
                 self.victron.stop_ess_control()
                 self.current_action = None
