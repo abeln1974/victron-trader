@@ -58,6 +58,7 @@ class QubinoReader:
         })
         self._cache: dict = {}          # entity_id → state-verdi
         self._last_fetch: float = 0.0   # tidspunkt for siste batch-henting
+        self._last_warn_time: float = 0.0  # Throttle warnings til maks 1/min
         if not self.ha_token:
             logger.warning("HA_TOKEN ikke satt — Qubino vil ikke fungere")
 
@@ -72,6 +73,8 @@ class QubinoReader:
         if now - self._last_fetch < HA_MIN_INTERVAL:
             return True  # Bruk eksisterende cache
 
+        # Oppdater alltid _last_fetch — også ved feil — for å unngå spam
+        self._last_fetch = now
         wanted = set(HA_ENTITIES.values())
         try:
             r = self._session.get(
@@ -85,15 +88,20 @@ class QubinoReader:
                     for s in all_states
                     if s["entity_id"] in wanted
                 }
-                self._last_fetch = now
                 logger.debug(f"Qubino batch-fetch OK: {len(self._cache)}/{len(wanted)} entiteter")
                 return True
             else:
-                logger.warning(f"HA /api/states {r.status_code}: {r.text[:80]}")
+                if now - self._last_warn_time >= 60:
+                    logger.warning(f"HA /api/states {r.status_code} — Qubino utilgjengelig")
+                    self._last_warn_time = now
         except requests.Timeout:
-            logger.warning("HA batch-fetch timeout")
+            if now - self._last_warn_time >= 60:
+                logger.warning("HA batch-fetch timeout — Qubino utilgjengelig")
+                self._last_warn_time = now
         except Exception as e:
-            logger.warning(f"HA batch-fetch feil: {e}")
+            if now - self._last_warn_time >= 60:
+                logger.warning(f"HA batch-fetch feil: {e}")
+                self._last_warn_time = now
         return False
 
     def _get_state(self, entity_id: str, as_str: bool = False):
@@ -124,9 +132,9 @@ class QubinoReader:
         if "status" in HA_ENTITIES:
             status = self._get_state(HA_ENTITIES["status"], as_str=True)
             if status == "dead":
-                logger.warning("Qubino Z-Wave node: dead — data kan være utdatert")
+                logger.debug("Qubino Z-Wave node: dead — data kan være utdatert")
             elif status is None:
-                logger.warning("Qubino Z-Wave node: unavailable — forsøker likevel")
+                logger.debug("Qubino Z-Wave node: unavailable — forsøker likevel")
 
         total = self._get_state(HA_ENTITIES["power_total"])
         l1    = self._get_state(HA_ENTITIES["power_l1"])
@@ -134,7 +142,7 @@ class QubinoReader:
         l3    = self._get_state(HA_ENTITIES["power_l3"])
 
         if total is None:
-            logger.warning("Qubino: total utilgjengelig (Z-Wave nede?)")
+            logger.debug("Qubino: total utilgjengelig (Z-Wave nede?) — fallback til Modbus")
             return None
 
         l1 = l1 or 0.0
