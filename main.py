@@ -352,7 +352,9 @@ class EnergyTrader:
             f"action={self.current_action.action if self.current_action else 'none'}"
         )
 
-        # --- DVCC: stopp lading når SOC >= lademål (uavhengig av setpoint) ---
+        # --- DVCC: stopp lading når SOC >= lademål ---
+        # set_max_charge_current(0) stopper KUN lading (strøm inn i batteri).
+        # Utlading påvirkes ikke — den styres av grid setpoint (reg 37).
         if soc >= target and not self._dvcc_charging_stopped:
             logger.info(f"SOC {soc:.1f}% >= lademål {target:.1f}% — DVCC=0A (ingen lading)")
             self.victron.set_max_charge_current(0)

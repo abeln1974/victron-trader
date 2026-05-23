@@ -297,10 +297,18 @@ class VictronModbus:
         return False
 
     def set_max_charge_current(self, amps: int) -> bool:
-        """Sett DVCC max ladestrøm (reg 2705). 0=stopp lading, -1=ingen grense.
+        """Sett DVCC max ladestrøm (reg 2705).
 
-        Brukes for å håndheve max SOC for NMC-levetid: sett 0A når SOC >= max_soc,
-        gjenopprett -1 når SOC < max_soc. Virker i både Mode 2 og Mode 3.
+        Styrer KUN lading (strøm inn i batteriet) — påvirker ikke utlading.
+        Utlading styres utelukkende av grid setpoint (reg 37).
+
+          0  = stopp lading (sol/nett kan ikke lade batteriet)
+         -1  = ingen grense (65535 unsigned, Victron tolker som ubegrenset)
+         >0  = maks ladestrøm i ampere
+
+        Brukes av _control_setpoint() for å håndheve charge_target_soc:
+        sett 0A når SOC >= lademål, gjenopprett -1 når SOC < lademål - 1%.
+        Virker i både ESS Mode 2 og Mode 3.
         """
         if self.readonly:
             return False
