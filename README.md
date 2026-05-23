@@ -1,6 +1,6 @@
 # Victron Energy Trader — Abelgård
 
-Automatisk styring av Victron ESS med tre parallelle strategier: **self-consumption** (batteri dekker husets forbruk på dagtid), **arbitrasje** (kjøp billig natt, selg/bruk dyrt dag), og **peak-shaving** (hindre grid > 9.5 kW, Føie AS kapasitetstrinn).
+Automatisk styring av Victron ESS med tre strategier: **self-consumption** (batteri dekker husets forbruk på dagtid), **arbitrasje** (kjøp billig natt, selg/bruk dyrt dag), og **peak-shaving** (hindre grid > 9.5 kW, Føie AS kapasitetstrinn).
 
 ## Anlegget
 
@@ -20,9 +20,9 @@ Automatisk styring av Victron ESS med tre parallelle strategier: **self-consumpt
 ## Arkitektur
 
 ```
-price_fetcher.py   — Spotpriser fra hvakosterstrommen.no (NO1)
-optimizer.py       — Optimal lade/utlade-plan + sol-reserve utlading
-main.py            — Hovedloop: trading hvert 60min, peak-shave/self-consume hvert 10s, keepalive 8s
+price_fetcher.py   — Spotpriser fra hvakosterstrommen.no (NO1), cachet 5 min
+optimizer.py       — Optimal lade/utlade-plan basert på pris og sol-prognose
+main.py            — Hovedloop: trading hvert 60min, _control_setpoint hvert 10s, keepalive 8s
 victron_modbus.py  — Modbus-TCP klient mot Cerbo GX (port 502)
 ha_qubino.py       — Qubino 3-fase grid-måler + EVCS-koordinering via HA REST API
 tariff.py          — Føie AS 2026 kapasitetstrinn, Norgespris-tak + Kraftriket priser
@@ -34,34 +34,35 @@ observe.py         — Diagnostikkverktøy: les alle Modbus-registre
 
 ## Styringsprinsipp
 
-Trader eier Victron **alltid** via Mode 3 (ekstern kontroll). Prioritetsrekkefølge hvert 10s:
+Trader eier Victron **alltid** via Mode 3 (ekstern kontroll). `_control_setpoint()` kjøres hvert 10s med fast prioritetsrekkefølge:
 
 ```
-Peak-shaving  >  enforce_max_soc  >  self-consume
+P1: MIN_SOC nødstopp  >  P2: Peak-shaving  >  P3: Fullt batteri eksport
+  >  P4/5: Arbitrasje  >  P6: Self-consume  >  Idle
 ```
 
-| Tilstand | Setpoint | Trigger |
-|----------|----------|---------|
-| **Oppstart** | 0W, DVCC frigjort (−1A) | `start()` kaller `set_max_charge_current(-1)` |
-| **Natt-lading** | +kW | Billig natttariff, SOC < charge_target_soc |
-| **Sol-reserve utlading** | −2 kW | SOC > charge_target_soc + 2%, dagtid, sol prognose tilsier det |
-| **Arbitrasje utlading** | −kW | Spot høy nok (terskel MIN_PRICE_DIFF_NOK) |
-| **Self-consumption** | −grid_kW | Dagtid, SOC > charge_target_soc + 1%, grid > 0.15 kW |
-| **Peak-shaving** | −kW | Grid > 9.5 kW, hvert 10s |
-| **Idle** | 0W | Ingen av over — keepalive holder Mode 3 |
-| **Planlagt stopp** | Hub4Mode=2, DVCC=−1 | `release_control()` nullstiller setpoint og DVCC ved shutdown |
-| **Krasj** | Passthru ~60s | Keepalive stopper → Victron tar Optimized etter timeout |
+| Prioritet | Tilstand | Setpoint | Trigger |
+|-----------|----------|----------|---------|
+| — | **Oppstart** | 0W, DVCC frigjort (−1A) | `start()` kaller `set_max_charge_current(-1)` |
+| P1 | **MIN_SOC nødstopp** | stopp utlading | SOC ≤ min_soc (35% normal / 45% storm mode) |
+| P2 | **Peak-shaving** | −kW nødvendig | Grid > 9.5 kW, hvert 10s via `_check_peak_shaving()` |
+| P3 | **Fullt batteri eksport** | −solar_W | SOC ≥ 90%, sol > 200W — eksporter alt til nett |
+| P4/5 | **Arbitrasje** | ±kW | Optimizer: natt-lading (billig spot) eller utlading (dyrt spot) |
+| P6 | **Self-consume** | 0W | Dagtid, SOC > charge_target_soc + 1%, grid > 0.15 kW |
+| — | **Idle** | 0W keepalive | Ingen av over — keepalive holder Mode 3 aktiv |
+| — | **Krasj** | Passthru ~60s | Keepalive stopper → Victron tar Optimized etter timeout |
 
-## Self-consumption
+**DVCC** (reg 2705) styrer **kun lading** (strøm inn i batteri) — påvirker ikke utlading. Settes til 0A ved SOC ≥ `charge_target_soc`, frigjøres ved SOC < `charge_target_soc` − 1%.
 
-Ny funksjonalitet (mai 2026): batteriet dekker husets forbruk på dagtid i stedet for at strøm kjøpes fra nett.
+## Self-consume (P6)
 
-**Logikk (`_check_self_consume()`, kjøres hvert 10s):**
-- Aktiveres: dagtid (06–22), SOC > `charge_target_soc` + 1%, snitt-grid > 0.15 kW
-- Setpoint = −(snitt_grid_kW) → batteriet leverer nøyaktig det huset trenger
-- **Aldri eksport** — setpointet begrenses alltid til faktisk grid-forbruk
-- Stopper: SOC ≤ `charge_target_soc` + 1%, natt, aktiv arbitrasje/peak-shave, eller snitt-grid < 0.10 kW
-- Hysterese: starter ved >0.15 kW, stopper ikke før <0.10 kW (unngår av/på-jaging)
+Batteriet dekker husets forbruk på dagtid — reduserer nett-import.
+
+**Logikk (del av `_control_setpoint()`, kjøres hvert 10s):**
+- Aktiveres: dagtid (06–22), SOC > `charge_target_soc` + 1%, snitt-grid ≥ 0.15 kW
+- Setpoint = 0W → Multiplus holder grid på 0, batteriet leverer det huset trenger
+- Stopper: SOC ≤ `charge_target_soc` + 1%, natt, aktiv arbitrasje/peak-shave, snitt-grid < 0.10 kW
+- Regulering: grid-avlesning hvert 10s justerer automatisk balansen — normalt oppførsel at self-consume starter/stopper når sol og forbruk varierer
 - Grid-snitt: rullende snitt av siste 3 avlesninger (~30s) for stabilitet
 
 **Verdi:** Sparer kjøpspris dag (81 øre/kWh inkl. mva) for kWh levert fra batteri. Batteriet lades opp igjen gratis av sol.
@@ -72,15 +73,14 @@ Open-Meteo MEPS gir sol-prognose for i morgen. Systemet beregner:
 ```
 charge_target_soc = max_soc - solar_reserve_pct
 ```
-Eksempel: prognose 17 kWh → reserve 37% → `charge_target_soc = 53%`
+Eksempel: prognose 24 kWh → reserve 40% → `charge_target_soc = 50%`
 
-`charge_target_soc` er dynamisk og brukes på fire steder:
-1. **Natt-lading**: lader kun til `charge_target_soc` (ikke alltid til 90%)
-2. **DVCC-grense**: DVCC=0A aktiveres ved SOC ≥ `charge_target_soc` — stopper Fronius fra å lade batteriet videre. Overstyrer **ikke** ESS-setpointet (self-consume/discharge kan fortsette).
-3. **Sol-reserve utlading**: dagtid (06–22) utlades 2 kW sakte ned mot `charge_target_soc` hvis SOC er over målet
-4. **Self-consume stopp**: self-consume deaktiveres når SOC ≤ `charge_target_soc` + 1%
+`charge_target_soc` er dynamisk og brukes på tre steder:
+1. **Natt-lading**: lader kun til `charge_target_soc` (ikke alltid til 90%) — slik at sol kan fylle resten neste dag
+2. **DVCC-grense**: DVCC=0A aktiveres ved SOC ≥ `charge_target_soc` — stopper lading (sol/nett inn i batteri). Påvirker **ikke** utlading — det styres av setpoint (reg 37)
+3. **Self-consume stopp**: self-consume deaktiveres når SOC ≤ `charge_target_soc` + 1%
 
-**Storm mode:** Hvis prognose < 10 kWh → MIN_SOC heves fra 35% til 45% (30t nødstrøm), lader til 90%, ingen sol-reserve utlading.
+**Storm mode:** Hvis prognose < 10 kWh → MIN_SOC heves fra 35% til 45% (30t nødstrøm), lader til 90%.
 
 ## Peak-shaving
 
@@ -90,7 +90,7 @@ Føie AS 2026 kapasitetstrinn basert på gjennomsnitt av 3 høyeste timer på ul
 
 Besparelse trinn 4→3: **243.7 kr/mnd**
 
-Grid-effekt overvåkes hvert 10s via Qubino (primær) eller VM-3P75CT (fallback). Ved >9.5 kW utlades batteriet med nøyaktig nødvendig effekt. Grid- og sol-verdier leses **én gang per 10s-syklus** og deles mellom peak-shave, enforce_max_soc og self-consume.
+Grid-effekt overvåkes hvert 10s via Qubino (primær) eller VM-3P75CT (fallback). Ved >9.5 kW utlades batteriet med nøyaktig nødvendig effekt. Grid- og sol-verdier leses **én gang per 10s-syklus** og deles mellom alle kontroll-funksjoner.
 
 ## Viktige Modbus-registre (CCGX register-list 3.71)
 
