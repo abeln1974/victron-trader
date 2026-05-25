@@ -6,7 +6,7 @@ Automatisk styring av Victron ESS med tre strategier: **self-consumption** (batt
 
 | Komponent | Detalj |
 |-----------|--------|
-| Cerbo GX | v3.72, IP 192.168.1.60, VRM site 411797 (Ethernet, kablet) |
+| Cerbo GX | v3.73, IP 192.168.1.60, VRM site 411797 (Ethernet, kablet) |
 | Invertere | 2× MultiPlus-II 48/5000/70-50 parallell |
 | Batteri | 4× Receel 12kWh NMC = 45.6 kWh brutto (42.8 kWh netto), ekstern REC-BMS |
 | Sol | Fronius Primo 5kW (AC-koblet på AC-out — **ikke** DC-bussen) |
@@ -16,6 +16,15 @@ Automatisk styring av Victron ESS med tre strategier: **self-consumption** (batt
 | EVCS | HQ2309VTVNF, 1-fase, 6–16A via HA |
 | Strømleverandør | Kraftriket Solstrøm (kraftriket.no) |
 | Nettleie | Føie AS 2026, prisområde NO1 |
+
+## Dokumentasjon
+
+| Fil | Innhold |
+|-----|---------|
+| **README.md** | Denne filen — systemoversikt, arkitektur, oppsett |
+| **CHANGELOG.md** | Dato-basert logg over endringer: firmware-oppdateringer, bugfixes, arkitektur-endringer |
+
+> Sjekk [CHANGELOG.md](./CHANGELOG.md) for historikk over Cerbo GX firmware-oppdateringer, bugfixes, og arkitektur-endringer.
 
 ## Arkitektur
 
