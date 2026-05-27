@@ -800,5 +800,6 @@ setInterval(fetchAll, 10000);
 """
 
 if __name__ == "__main__":
-    port = int(os.getenv("WEB_PORT", "8080"))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    import subprocess, sys
+    port = os.getenv("WEB_PORT", "8080")
+    subprocess.run(["gunicorn", "-w", "2", "-b", f"0.0.0.0:{port}", "--timeout", "30", "web:app"])

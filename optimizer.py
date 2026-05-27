@@ -231,41 +231,6 @@ class Optimizer:
 
         return actions, charge_target_soc
 
-    def peak_shave(self, current_grid_kw: float, soc: float) -> Optional[Action]:
-        """
-        Peak-shaving: Utlad batteriet for a hindre at effekttopper
-        forer til hoyere kapasitetstrinn hos Foe AS 2026.
-
-        Foe AS bruker snitt av de 3 hoyeste timer pa ULIKE dager per mnd.
-        Mal: Hold under 9.5kW (buffer til 10kW-grensen).
-        Trinn 3 (5-9.99kW): 418.8 kr/mnd
-        Trinn 4 (10-14.99kW): 662.5 kr/mnd  <- faktisk trinn na (12.09 kW avregnet)
-        Besparelse: 243.7 kr/mnd ved a holde seg i trinn 3.
-
-        current_grid_kw: Navarende effekt fra nettet (malt via Qubino)
-        soc: Batteriets navarende ladeniva (%)
-        """
-        if current_grid_kw <= self.peak_limit_kw:
-            return None
-
-        excess_kw = current_grid_kw - self.peak_limit_kw
-        avail_kwh = self.capacity * (soc - self.min_soc) / 100 - self.peak_reserve
-
-        if avail_kwh <= 0:
-            return None
-
-        discharge_kw = min(excess_kw, self.max_discharge, avail_kwh)
-
-        saving_per_event = 243.7 / 5  # ~5 peak-events per mnd, konservativt
-
-        return Action(
-            timestamp=datetime.now(OSLO_TZ),
-            action='peak_shave',
-            power_kw=-discharge_kw,
-            expected_profit_nok=saving_per_event,
-            reason=f'Grid {current_grid_kw:.1f}kW > {self.peak_limit_kw}kW grense'
-        )
-
     def get_immediate_action(self, current_price: PricePoint,
                             prices: List[PricePoint],
                             soc: float, solar_kw: float = 0.0) -> tuple:

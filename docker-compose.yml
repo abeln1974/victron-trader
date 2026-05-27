@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   victron-trader:
     build: .
@@ -27,7 +25,6 @@ services:
       - HA_TOKEN=${HA_TOKEN:-}
       - HA_TIMEOUT=${HA_TIMEOUT:-3.0}
       - HA_MIN_INTERVAL=${HA_MIN_INTERVAL:-10.0}
-      - EVCS_ENTITY_PREFIX=${EVCS_ENTITY_PREFIX:-evcs_hq2309vtvnf}
       - EVCS_MIN_CURRENT_A=${EVCS_MIN_CURRENT_A:-6}
       - EVCS_MAX_CURRENT_A=${EVCS_MAX_CURRENT_A:-16}
       - EVCS_PHASES=${EVCS_PHASES:-1}
@@ -59,7 +56,7 @@ services:
     build: .
     container_name: victron-web
     restart: unless-stopped
-    command: python web.py
+    command: gunicorn -w 2 -b 0.0.0.0:8080 --timeout 30 web:app
     network_mode: host
     environment:
       - VICTRON_HOST=${VICTRON_HOST:-192.168.1.60}

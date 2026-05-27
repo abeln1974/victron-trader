@@ -4,4 +4,5 @@ python-dotenv>=1.0.0
 schedule>=1.2.0
 pydantic>=2.0.0
 flask>=3.0.0
+gunicorn>=22.0.0
 zeroconf>=0.131.0
