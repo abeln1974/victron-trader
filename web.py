@@ -22,7 +22,9 @@ _price_lock = threading.Lock()
 _live_cache = {
     "soc": None, "grid_w": None, "grid_l1": None, "grid_l2": None, "grid_l3": None,
     "grid_source": None,  # 'qubino' eller 'modbus'
-    "solar_w": None, "battery_w": None, "updated": None, "error": None
+    "solar_w": None, "battery_w": None,
+    "evcs_w": None, "evcs_status": None,  # EVCS elbil-lader
+    "updated": None, "error": None
 }
 _live_lock = threading.Lock()
 
@@ -30,9 +32,10 @@ def _poll_cerbo():
     """Bakgrunnstråd: les Cerbo GX via Modbus + Qubino via HA hvert 10s."""
     import time
     from victron_modbus import VictronModbus
-    from ha_qubino import QubinoReader
+    from ha_qubino import QubinoReader, EVCSController
     vic = VictronModbus()
     qubino = QubinoReader()
+    evcs = EVCSController()
     connected = False
     while True:
         try:
@@ -59,6 +62,13 @@ def _poll_cerbo():
                     grid_w  = (grid_l1 or 0) + (grid_l2 or 0)
                     grid_src = "modbus"
 
+                # EVCS: les effekt og status direkte via Modbus
+                try:
+                    evcs_w      = evcs.get_power_kw() * 1000
+                    evcs_status = evcs.get_status()
+                except Exception:
+                    evcs_w, evcs_status = None, None
+
                 with _live_lock:
                     _live_cache.update({
                         "soc": soc,
@@ -67,6 +77,8 @@ def _poll_cerbo():
                         "grid_source": grid_src,
                         "solar_w": solar_w,
                         "battery_w": bat_raw,
+                        "evcs_w": evcs_w,
+                        "evcs_status": evcs_status,
                         "updated": datetime.now(OSLO_TZ).isoformat(),
                         "error": None
                     })
@@ -345,13 +357,17 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
 
       </div>
 
-      <!-- Bottom flow: Batteri -->
+      <!-- Bottom flow: Batteri + EVCS -->
       <div class="flex items-center justify-center gap-3 mt-5 pt-4 border-t border-slate-800">
         <div class="text-xs text-slate-400 mono" id="fBatFlow">Batteri: —</div>
         <svg width="80" height="14" class="shrink-0">
           <line id="lineBat" x1="2" y1="7" x2="78" y2="7" stroke="#22c55e" stroke-width="2" stroke-dasharray="6 4"/>
         </svg>
         <div class="text-xs text-slate-500">&#8597; bat</div>
+      </div>
+      <div class="flex items-center justify-center gap-3 mt-2">
+        <div class="text-xs mono" id="fEvcsFlow"><span class="text-slate-500">EVCS: </span><span id="fEvcsW" class="text-slate-400">—</span></div>
+        <div class="text-xs text-slate-500" id="fEvcsStatus"></div>
       </div>
     </div>
 
@@ -612,7 +628,9 @@ async function fetchAll() {
   const solarW = live.solar_w ?? 0;
   const gridW  = live.grid_w ?? 0;
   const batW   = live.battery_w ?? 0;
-  const loadW  = solarW + gridW - batW;
+  const evcsW   = live.evcs_w ?? 0;
+  const evcsSt  = live.evcs_status;
+  const loadW   = solarW + gridW - batW;
 
   // Flow
   document.getElementById('fGrid').textContent  = fmtW(gridW);
@@ -641,6 +659,13 @@ async function fetchAll() {
   setFlow('lineGrid',  Math.abs(gridW)>20, gridW<0);
   setFlow('lineSolar', solarW>20, false);
   setFlow('lineBat',   Math.abs(batW)>20, batW>0);
+
+  // EVCS
+  const EVCS_STATUS = {0:'frakoblet',1:'tilkoblet',2:'lader',3:'ferdig ladet',4:'venter sol',7:'lav SOC',21:'starter',24:'stopper'};
+  document.getElementById('fEvcsW').textContent = evcsW>50?fmtW(evcsW):(evcsSt!=null&&evcsSt!==0?'0 W':'—');
+  document.getElementById('fEvcsW').style.color = evcsW>50?'#22d3ee':'#64748b';
+  document.getElementById('fEvcsStatus').textContent = evcsSt!=null?'('+( EVCS_STATUS[evcsSt]||'status '+evcsSt)+')':'';
+
   // arrowhead Grid direction
   const ag = document.getElementById('arrowGrid');
   if(ag) ag.setAttribute('points', gridW<-50?'2,10 12,5 12,15':'62,10 52,5 52,15');
