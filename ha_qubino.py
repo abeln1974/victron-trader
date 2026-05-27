@@ -196,13 +196,15 @@ class EVCSController:
     STATUS_LOW_SOC      = 7
 
     # EVCS Modbus-registre
-    REG_MODE        = 5009
-    REG_STARTSTOP   = 5010
-    REG_POWER_TOTAL = 5014
-    REG_STATUS      = 5015
-    REG_SET_CURRENT = 5016
-    REG_MAX_CURRENT = 5017
-    REG_CURRENT     = 5018  # /10 = A
+    REG_MODE          = 5009
+    REG_STARTSTOP      = 5010
+    REG_POWER_TOTAL    = 5014
+    REG_STATUS         = 5015
+    REG_SET_CURRENT    = 5016
+    REG_MAX_CURRENT    = 5017
+    REG_CURRENT        = 5018  # /10 = A
+    REG_SESSION_ENERGY = 5021  # /100 = kWh
+    REG_MIN_CURRENT    = 5062
 
     def __init__(self):
         from config import CONFIG
@@ -350,6 +352,23 @@ class EVCSController:
     def get_status(self) -> Optional[int]:
         """Les EVCS status-kode."""
         return self._read(self.REG_STATUS)
+
+    def get_details(self) -> dict:
+        """Les alle EVCS-detaljer i én runde for dashboard-infokort."""
+        status  = self._read(self.REG_STATUS)
+        mode    = self._read(self.REG_MODE)
+        power   = self._read(self.REG_POWER_TOTAL)
+        current = self._read(self.REG_CURRENT)
+        set_a   = self._read(self.REG_SET_CURRENT)
+        session = self._read(self.REG_SESSION_ENERGY)
+        return {
+            "status":         status,
+            "mode":           mode,
+            "power_w":        float(power) if power is not None else None,
+            "current_a":      round(current / 10, 1) if current is not None else None,
+            "set_current_a":  set_a,
+            "session_kwh":    round(session / 100, 2) if session is not None else None,
+        }
 
     # ------------------------------------------------------------------ #
     # Styring                                                              #

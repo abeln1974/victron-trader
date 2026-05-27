@@ -23,7 +23,8 @@ _live_cache = {
     "soc": None, "grid_w": None, "grid_l1": None, "grid_l2": None, "grid_l3": None,
     "grid_source": None,  # 'qubino' eller 'modbus'
     "solar_w": None, "battery_w": None,
-    "evcs_w": None, "evcs_status": None,  # EVCS elbil-lader
+    "evcs_w": None, "evcs_status": None, "evcs_mode": None,
+    "evcs_current_a": None, "evcs_set_current_a": None, "evcs_session_kwh": None,
     "updated": None, "error": None
 }
 _live_lock = threading.Lock()
@@ -62,12 +63,17 @@ def _poll_cerbo():
                     grid_w  = (grid_l1 or 0) + (grid_l2 or 0)
                     grid_src = "modbus"
 
-                # EVCS: les effekt og status direkte via Modbus
+                # EVCS: les alle detaljer direkte via Modbus
                 try:
-                    evcs_w      = evcs.get_power_kw() * 1000
-                    evcs_status = evcs.get_status()
+                    ed = evcs.get_details()
+                    evcs_w           = ed.get("power_w")
+                    evcs_status      = ed.get("status")
+                    evcs_mode        = ed.get("mode")
+                    evcs_current_a   = ed.get("current_a")
+                    evcs_set_a       = ed.get("set_current_a")
+                    evcs_session_kwh = ed.get("session_kwh")
                 except Exception:
-                    evcs_w, evcs_status = None, None
+                    evcs_w = evcs_status = evcs_mode = evcs_current_a = evcs_set_a = evcs_session_kwh = None
 
                 with _live_lock:
                     _live_cache.update({
@@ -79,6 +85,10 @@ def _poll_cerbo():
                         "battery_w": bat_raw,
                         "evcs_w": evcs_w,
                         "evcs_status": evcs_status,
+                        "evcs_mode": evcs_mode,
+                        "evcs_current_a": evcs_current_a,
+                        "evcs_set_current_a": evcs_set_a,
+                        "evcs_session_kwh": evcs_session_kwh,
                         "updated": datetime.now(OSLO_TZ).isoformat(),
                         "error": None
                     })
@@ -436,6 +446,23 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
     </div>
   </section>
 
+  <!-- ROW 2b: EVCS-infokort -->
+  <div class="card p-3" id="evcsCard">
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-2">
+        <span class="text-xl">&#128663;</span>
+        <span class="text-xs font-semibold text-slate-400 uppercase tracking-widest">EVCS</span>
+        <span class="text-xs px-2 py-0.5 rounded-full border font-semibold mono" id="evcsStatusPill" style="border-color:#475569;color:#475569">—</span>
+      </div>
+      <div class="mono text-xl font-bold" id="evcsCardW" style="color:#22d3ee">— W</div>
+    </div>
+    <div class="grid grid-cols-3 gap-2 text-xs border-t border-slate-800 pt-2">
+      <div><span class="text-slate-500">Ladestrøm</span><br><span class="mono font-semibold text-slate-200" id="evcsCardCurrent">—</span></div>
+      <div><span class="text-slate-500">Satt strøm</span><br><span class="mono font-semibold text-slate-200" id="evcsCardSetCurrent">—</span></div>
+      <div><span class="text-slate-500">Sesjon</span><br><span class="mono font-semibold text-slate-200" id="evcsCardSession">—</span></div>
+    </div>
+  </div>
+
   <!-- ROW 3: Prisbar + Sol-profil -->
   <section class="grid grid-cols-1 md:grid-cols-2 gap-3">
     <div class="card p-4">
@@ -698,6 +725,26 @@ async function fetchAll() {
   document.getElementById('fEvcsW').textContent = evcsW>50?fmtW(evcsW):(evcsSt!=null&&evcsSt!==0?'0 W':'—');
   document.getElementById('fEvcsW').style.color = evcsActive?'#22d3ee':'#64748b';
   document.getElementById('fEvcsStatus').textContent = evcsSt!=null?(EVCS_STATUS[evcsSt]||'st.'+evcsSt):'';
+
+  // EVCS infokort
+  const EVCS_STATUS_LABEL = {0:'Frakoblet',1:'Tilkoblet',2:'Lader',3:'Ferdig ladet',4:'Venter sol',7:'Lav SOC',21:'Starter',24:'Stopper'};
+  const EVCS_STATUS_COLOR = {0:'#475569',1:'#94a3b8',2:'#22d3ee',3:'#22c55e',4:'#f59e0b',7:'#ef4444',21:'#22d3ee',24:'#94a3b8'};
+  const evcsSLabel = evcsSt!=null ? (EVCS_STATUS_LABEL[evcsSt]||'Status '+evcsSt) : '—';
+  const evcsSColor = evcsSt!=null ? (EVCS_STATUS_COLOR[evcsSt]||'#475569') : '#475569';
+  document.getElementById('evcsStatusPill').textContent = evcsSLabel;
+  document.getElementById('evcsStatusPill').style.color = evcsSColor;
+  document.getElementById('evcsStatusPill').style.borderColor = evcsSColor;
+  document.getElementById('evcsCardW').textContent = evcsW>0 ? fmtW(evcsW) : '0 W';
+  document.getElementById('evcsCardW').style.color = evcsW>50?'#22d3ee':'#64748b';
+  const eca = live.evcs_current_a;
+  const esa = live.evcs_set_current_a;
+  const eskwh = live.evcs_session_kwh;
+  const emode = live.evcs_mode;
+  document.getElementById('evcsCardCurrent').textContent  = eca!=null ? eca+'A' : '—';
+  document.getElementById('evcsCardSetCurrent').textContent = esa!=null ? esa+'A' : '—';
+  document.getElementById('evcsCardSession').textContent  = eskwh!=null ? eskwh+' kWh' : '—';
+  // Skjul kortet hvis EVCS er frakoblet og ingen strøm
+  document.getElementById('evcsCard').style.opacity = (evcsSt===0||evcsSt==null) ? '0.45' : '1';
 
   // arrowhead Grid direction
   const ag = document.getElementById('arrowGrid');
