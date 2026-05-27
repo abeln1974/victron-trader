@@ -145,7 +145,8 @@ class EnergyTrader:
             self.victron.enable_external_control()
 
         self.victron.set_min_soc(CONFIG.min_soc)
-        logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%")
+        self.victron.set_max_charge_current(-1)  # Frigjør DVCC ved oppstart (kan være 0A fra forrige kjøring)
+        logger.info(f"ESS min SOC: {CONFIG.min_soc:.0f}%  max SOC: {CONFIG.max_soc:.0f}%  DVCC: frigjort")
 
         self.running = True
         signal.signal(signal.SIGINT, self._signal_handler)
