@@ -106,7 +106,7 @@ if os.getenv("VICTRON_HOST"):
 def get_prices_cached():
     with _price_lock:
         now = datetime.now(OSLO_TZ)
-        if not _price_cache["fetched"] or (now - _price_cache["fetched"]).seconds > 1800:
+        if not _price_cache["fetched"] or (now - _price_cache["fetched"]).total_seconds() > 1800:
             try:
                 _price_cache["data"] = fetcher.get_prices(36)  # Hent i dag + i morgen (alle tilgjengelige)
                 _price_cache["fetched"] = now

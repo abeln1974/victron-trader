@@ -345,7 +345,7 @@ class EnergyTrader:
         is_daytime = 6 <= now_hour < 22
 
         bat_w   = self._cached_bat_w
-        load_w  = solar_w + grid_w  # faktisk forbruk (W)
+        load_w  = solar_w + grid_w - bat_w  # faktisk forbruk (W)
 
         logger.debug(
             f"[ctrl] SOC={soc:.1f}% sol={solar_w:.0f}W grid={grid_w:+.0f}W "
