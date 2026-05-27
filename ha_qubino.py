@@ -430,7 +430,9 @@ if __name__ == "__main__":
     print()
     evcs = EVCSController()
     status = evcs.get_status()
-    status_names = {0:'disconnected',1:'connected',2:'charging',3:'charged',4:'wait_sun',7:'low_soc'}
+    status_names = {0:'disconnected',1:'connected',2:'charging',3:'charged',4:'wait_sun',
+                    5:'wait_rfid',6:'wait_start',7:'low_soc',8:'gnd_error',9:'weld_con',
+                    21:'startcharge',22:'switch_3p',23:'switch_1p',24:'stop_charging'}
     print(f"EVCS status: {status} ({status_names.get(status, 'ukjent')})")
     print(f"EVCS power: {evcs.get_power_kw():.2f} kW")
     print(f"EVCS koblet til: {evcs.is_connected()}")
