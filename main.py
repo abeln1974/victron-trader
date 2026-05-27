@@ -64,6 +64,7 @@ class EnergyTrader:
         self._SOLAR_CACHE_TTL: float = 3600.0  # 1 time
         self._charge_target_soc: float = CONFIG.max_soc  # Oppdateres av optimizer
         self._self_consume_active: bool = False  # Sporer self-consume modus
+        self._self_consume_stop_time: float = 0.0  # Cooldown etter stopp (unngår oscillering)
         self._grid_history: list = []              # Rullende snitt grid-avlesninger (W)
         self._cached_grid_w: float = 0.0           # Grid-avlesning cachet per 10s-syklus
         self._cached_solar_w: float = 0.0          # Sol-avlesning cachet per 10s-syklus
@@ -448,6 +449,7 @@ class EnergyTrader:
             elif avg_grid_kw < 0.10:
                 logger.info(f"[P6] Self-consume: snitt-grid {avg_grid_kw:.2f}kW < 0.10kW — sol dekker, stopper")
                 self._self_consume_active = False
+                self._self_consume_stop_time = time.time()
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
             else:
@@ -457,7 +459,10 @@ class EnergyTrader:
                 )
             return
 
-        if avg_grid_kw >= 0.15 or night_drain:
+        _SELF_CONSUME_COOLDOWN_S = 300  # 5 min — unngå oscillering ved variabelt sol
+        cooldown_ok = night_drain or (time.time() - self._self_consume_stop_time >= _SELF_CONSUME_COOLDOWN_S)
+
+        if (avg_grid_kw >= 0.15 or night_drain) and cooldown_ok:
             if night_drain:
                 hours_left = self._hours_to_sunrise()
                 setpoint_w = self._calc_night_drain_setpoint(soc, target, hours_left)

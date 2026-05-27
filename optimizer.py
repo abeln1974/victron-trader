@@ -111,7 +111,8 @@ class Optimizer:
             panel_peak_kw=CONFIG.solar_max_kw,
             system_efficiency=CONFIG.solar_system_efficiency,
         )
-        storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+        # None = API nede, ingen cache — ikke trigger storm-mode på manglende data
+        storm_mode = solar_kwh_tomorrow is not None and solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
         effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else self.min_soc
 
         if storm_mode:
@@ -129,7 +130,7 @@ class Optimizer:
             battery_capacity_kwh=self.capacity,
             system_efficiency=CONFIG.solar_system_efficiency,
             fallback_hours=CONFIG.solar_fallback_hours,
-            solar_kwh_override=solar_kwh_tomorrow if solar_kwh_tomorrow > 0 else None,
+            solar_kwh_override=solar_kwh_tomorrow if solar_kwh_tomorrow and solar_kwh_tomorrow > 0 else None,
         )
         # Storm-mode: Lad til høyere SOC for å ha backup
         charge_target_soc = self.max_soc if storm_mode else max(

@@ -83,12 +83,20 @@ def get_solar_kwh_tomorrow(lat: float, lon: float,
         import time
         now = time.monotonic()
         if now - _last_warning_time >= 3600:
-            log.warning("Open-Meteo ikke tilgjengelig: %s — bruker statisk sol-reserve", e)
             _last_warning_time = now
-        return 0.0
+            if _solar_kwh_cache["fetched"] > 0 and _solar_kwh_cache["lat"] == lat:
+                log.warning("Open-Meteo ikke tilgjengelig: %s — bruker cache %.1f kWh", e, _solar_kwh_cache["value"])
+            else:
+                log.warning("Open-Meteo ikke tilgjengelig: %s — ingen cache, storm-mode deaktivert", e)
+        # Returner stale cache hvis den finnes, ellers None (ikke 0 — unngå falskt storm-mode)
+        if _solar_kwh_cache["fetched"] > 0 and _solar_kwh_cache["lat"] == lat:
+            return _solar_kwh_cache["value"]
+        return None
     except Exception as e:
-        log.warning("Sol-prognose feil: %s — bruker statisk sol-reserve", e)
-        return 0.0
+        log.warning("Sol-prognose feil: %s — bruker cache/fallback", e)
+        if _solar_kwh_cache["fetched"] > 0 and _solar_kwh_cache["lat"] == lat:
+            return _solar_kwh_cache["value"]
+        return None
 
 
 def get_solar_reserve_pct(lat: float, lon: float,
