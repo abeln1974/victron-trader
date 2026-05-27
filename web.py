@@ -340,7 +340,7 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
              Batteri: 230, 330, 50
            ViewBox: 0 0 460 400 (14px margin rundt ytterste kant)
       -->
-      <svg id="flowSvg" viewBox="0 0 460 400" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto">
+      <svg id="flowSvg" viewBox="0 0 460 400" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;max-height:340px">
         <defs>
           <marker id="arrGrid"  markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#818cf8"/></marker>
           <marker id="arrSol"   markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#f59e0b"/></marker>
