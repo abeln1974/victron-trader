@@ -327,10 +327,10 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
 
 <main class="max-w-5xl mx-auto px-3 py-4 space-y-4">
 
-  <!-- ROW 1: Energy flow (full bredde) + Batteri-kort ved siden -->
-  <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
+  <!-- ROW 1: Energiflyt (3/5) + Batteri (2/5) -->
+  <section class="grid grid-cols-1 md:grid-cols-5 gap-3">
 
-    <div class="card card-glow-brand p-4 md:col-span-2">
+    <div class="card card-glow-brand p-4 md:col-span-3">
       <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Energiflyt — live</div>
 
       <!-- SVG nodediagram
@@ -342,7 +342,7 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
              Batteri: 230, 330, 50
            ViewBox: 0 0 460 400 (14px margin rundt ytterste kant)
       -->
-      <svg id="flowSvg" viewBox="0 0 460 400" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto;min-height:320px">
+      <svg id="flowSvg" viewBox="0 0 460 400" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;height:auto">
         <defs>
           <marker id="arrGrid"  markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#818cf8"/></marker>
           <marker id="arrSol"   markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#f59e0b"/></marker>
@@ -397,7 +397,7 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
     </div>
 
     <!-- Batteri -->
-    <div class="card card-glow-bat p-4 flex flex-col items-center justify-center gap-3">
+    <div class="card card-glow-bat p-4 md:col-span-2 flex flex-col items-center justify-center gap-3">
       <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Batteri</div>
       <div class="relative" style="width:56px;height:94px;">
         <div class="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-2.5 rounded-t bg-slate-600"></div>
