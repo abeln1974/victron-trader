@@ -221,23 +221,76 @@ class EVCSController:
         self._last_warn_time: float = 0.0
         self._cache: dict = {}
 
+    def _resolve_host_mdns(self) -> Optional[str]:
+        """Finn EVCS via mDNS (_victron-car-charger._tcp) hvis konfigurert IP ikke svarer.
+
+        EVCS annonserer seg selv via mDNS — brukes som fallback hvis IP har endret seg.
+        Returnerer ny IP-adresse, eller None hvis ikke funnet.
+        """
+        try:
+            from zeroconf import ServiceBrowser, Zeroconf
+            import time as _t
+            found = []
+            class _Listener:
+                def add_service(self, zc, type_, name):
+                    info = zc.get_service_info(type_, name)
+                    if info and info.addresses:
+                        import socket
+                        ip = socket.inet_ntoa(info.addresses[0])
+                        found.append(ip)
+                def remove_service(self, *_): pass
+                def update_service(self, *_): pass
+            zc = Zeroconf()
+            ServiceBrowser(zc, "_victron-car-charger._tcp.local.", _Listener())
+            _t.sleep(2)
+            zc.close()
+            if found:
+                logger.info(f"EVCS mDNS-oppslag: funnet {found[0]} (config: {self._host})")
+                return found[0]
+        except ImportError:
+            logger.debug("zeroconf ikke installert — mDNS-fallback utilgjengelig")
+        except Exception as e:
+            logger.debug(f"EVCS mDNS-oppslag feilet: {e}")
+        return None
+
     def _ensure_connected(self) -> bool:
-        """Koble til EVCS Modbus hvis ikke allerede tilkoblet."""
+        """Koble til EVCS Modbus hvis ikke allerede tilkoblet.
+
+        Ved tilkoblingsfeil forsøkes mDNS-oppslag for å finne ny IP hvis enheten
+        har fått ny adresse (f.eks. etter DHCP-lease-endring).
+        """
         if self._connected_modbus and self._client.connected:
             return True
         try:
             self._connected_modbus = self._client.connect()
-            if self._connected_modbus and self._last_current_a == -1:
+        except Exception as e:
+            logger.debug(f"EVCS Modbus tilkobling feilet ({self._host}): {e}")
+            self._connected_modbus = False
+
+        if not self._connected_modbus:
+            # Fallback: prøv mDNS for å finne ny IP
+            new_ip = self._resolve_host_mdns()
+            if new_ip and new_ip != self._host:
+                logger.warning(f"EVCS: IP endret {self._host} → {new_ip}, prøver ny adresse")
+                self._host = new_ip
+                from pymodbus.client import ModbusTcpClient
+                self._client = ModbusTcpClient(self._host, port=self._port, timeout=3)
+                try:
+                    self._connected_modbus = self._client.connect()
+                except Exception:
+                    self._connected_modbus = False
+
+        if self._connected_modbus and self._last_current_a == -1:
+            try:
                 r = self._client.read_holding_registers(
                     address=self.REG_SET_CURRENT, count=1, device_id=self._unit)
                 if r and not r.isError():
                     self._last_current_a = r.registers[0]
-                    logger.info(f"EVCS oppstart-sync: SetCurrent={self._last_current_a}A")
+                    logger.info(f"EVCS oppstart-sync: SetCurrent={self._last_current_a}A @ {self._host}")
                 else:
                     self._last_current_a = 0
-        except Exception as e:
-            logger.debug(f"EVCS Modbus tilkobling feilet: {e}")
-            self._connected_modbus = False
+            except Exception:
+                self._last_current_a = 0
         return self._connected_modbus
 
     def _read(self, register: int) -> Optional[int]:
