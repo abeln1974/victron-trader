@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import math
 import signal
 import logging
 import logging.handlers
@@ -404,9 +405,9 @@ class EnergyTrader:
             self._self_consume_active = False
             return
 
-        # --- 6. Self-consume: batteri dekker husforbruk ---
-        # Natt-unntak: tøm batteri til lademål hvis SOC > lademål + 5% og EVCS ikke lader.
-        # Gir plass til morgendagens sol uten å eksportere til nett.
+        # --- 6. Self-consume / natt-tøm ---
+        # Natt-tøm: aktiv utlading basert på tid til soloppgang når SOC > lademål + 5%.
+        # Tidlig natt → lav effekt.  Nær soloppgang → opp mot 10kW.
         night_drain = not is_daytime and soc > target + 5.0
 
         if not is_daytime and not night_drain:
@@ -421,7 +422,8 @@ class EnergyTrader:
 
         if soc <= target + 1.0:
             if self._self_consume_active:
-                logger.info(f"[P6] Self-consume: SOC {soc:.1f}% nede på lademål {target:.1f}% — stopper")
+                tag = "natt-tøm ferdig" if night_drain else "SOC ved lademål"
+                logger.info(f"[P6] {tag}: SOC {soc:.1f}% ≤ lademål {target:.1f}% + 1% — stopper")
                 self._self_consume_active = False
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
@@ -435,7 +437,15 @@ class EnergyTrader:
         avg_grid_kw = (sum(self._grid_history) / len(self._grid_history)) / 1000.0
 
         if self._self_consume_active:
-            if avg_grid_kw < 0.10:
+            if night_drain:
+                hours_left = self._hours_to_sunrise()
+                setpoint_w = self._calc_night_drain_setpoint(soc, target, hours_left)
+                self.victron.set_grid_setpoint(setpoint_w)
+                logger.debug(
+                    f"[P6] Natt-tøm: SOC {soc:.1f}%→{target:.1f}%, "
+                    f"setpoint {setpoint_w/1000:.2f}kW, {hours_left:.1f}t til sol"
+                )
+            elif avg_grid_kw < 0.10:
                 logger.info(f"[P6] Self-consume: snitt-grid {avg_grid_kw:.2f}kW < 0.10kW — sol dekker, stopper")
                 self._self_consume_active = False
                 self._grid_history.clear()
@@ -443,20 +453,24 @@ class EnergyTrader:
             else:
                 logger.debug(
                     f"[P6] Self-consume aktiv: grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W "
-                    f"bat {bat_w:+.0f}W SOC {soc:.1f}% — keepalive=0W"
+                    f"bat {bat_w:+.0f}W SOC {soc:.1f}%"
                 )
             return
 
-        if avg_grid_kw >= 0.15:
-            mode_tag = f"natt-tøm (SOC {soc:.1f}%→{target:.1f}%)" if night_drain else f"SOC {soc:.1f}% > mål {target:.1f}%"
-            logger.info(
-                f"[P6] Self-consume START: {mode_tag}, "
-                f"grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W → setpoint 0W"
-            )
+        if avg_grid_kw >= 0.15 or night_drain:
+            if night_drain:
+                hours_left = self._hours_to_sunrise()
+                setpoint_w = self._calc_night_drain_setpoint(soc, target, hours_left)
+                mode_tag = (f"natt-tøm SOC {soc:.1f}%→{target:.1f}%, "
+                            f"{hours_left:.1f}t til sol, setpoint {setpoint_w/1000:.2f}kW")
+            else:
+                setpoint_w = 0
+                mode_tag = f"SOC {soc:.1f}% > mål {target:.1f}%"
+            logger.info(f"[P6] START: {mode_tag}, grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W")
             self._self_consume_active = True
-            self.victron.set_grid_setpoint(0)
+            self.victron.set_grid_setpoint(setpoint_w)
         else:
-            logger.debug(f"[P6] Grid {avg_grid_kw:.2f}kW < 0.15kW — {'natt-idle' if night_drain else 'sol dekker forbruket'}, idle")
+            logger.debug(f"[P6] Grid {avg_grid_kw:.2f}kW < 0.15kW — sol dekker forbruket, idle")
 
     def _execute_trade_cycle(self):
         try:
@@ -558,6 +572,48 @@ class EnergyTrader:
             return qpower["total"]
         logger.debug("Qubino utilgjengelig — fallback VM-3P75CT")
         return self.victron.get_grid_power()
+
+    def _hours_to_sunrise(self) -> float:
+        """Timer til neste soloppgang basert på astronomisk beregning (±5min nøyaktighet)."""
+        now = datetime.now(OSLO_TZ)
+        lat_rad = math.radians(CONFIG.site_lat)
+        for offset_days in range(3):
+            d = (now + timedelta(days=offset_days)).date()
+            n = d.timetuple().tm_yday
+            decl = math.radians(-23.45 * math.cos(math.radians(360 / 365 * (n + 10))))
+            cos_h = max(-1.0, min(1.0, -math.tan(lat_rad) * math.tan(decl)))
+            H_deg = math.degrees(math.acos(cos_h))
+            sunrise_utc_h = 12.0 - H_deg / 15.0 - CONFIG.site_lon / 15.0
+            oslo_offset = 2 if 4 <= d.month <= 10 else 1
+            midnight = datetime(d.year, d.month, d.day, tzinfo=OSLO_TZ)
+            sunrise_dt = midnight + timedelta(hours=sunrise_utc_h + oslo_offset)
+            delta_h = (sunrise_dt - now).total_seconds() / 3600.0
+            if delta_h > 0.05:
+                return delta_h
+        return 0.5  # Fallback: 30 min
+
+    def _calc_night_drain_setpoint(self, soc: float, target: float, hours_left: float) -> int:
+        """Beregn aktivt utlade-setpoint (W) for å nå lademål akkurat ved soloppgang.
+
+        Negativ = eksporter til nett (utlader batteriet aktivt utover husforbruk).
+        Tidlig på natt → lite eksport (lang tid igjen).
+        Nær soloppgang → opp mot 10kW (kort tid, mange kWh igjen).
+        Justeres hvert 10s i _control_setpoint().
+        """
+        kwh_to_drain = CONFIG.battery_capacity_kwh * max(0.0, soc - target) / 100.0
+        if kwh_to_drain <= 0 or hours_left <= 0:
+            return 0
+        needed_kw = min(kwh_to_drain / max(0.1, hours_left), CONFIG.battery_max_discharge_kw)
+        # Husforbruk = hva huset allerede trekker fra batteri + grid + sol
+        bat_discharge_kw = max(0.0, -self._cached_bat_w / 1000.0)
+        house_kw = bat_discharge_kw + max(0.0, self._cached_grid_w / 1000.0) + self._cached_solar_w / 1000.0
+        # Eksport = ønsket utlading minus det huset allerede absorberer
+        export_kw = max(0.0, needed_kw - house_kw)
+        logger.debug(
+            f"Natt-tøm setpoint: {kwh_to_drain:.2f}kWh gjenstår, {hours_left:.1f}t til sol → "
+            f"behov {needed_kw:.2f}kW, hus {house_kw:.2f}kW, eksport {export_kw:.2f}kW"
+        )
+        return -int(export_kw * 1000)
 
     def _check_peak_shaving(self):
         try:
@@ -713,7 +769,8 @@ class EnergyTrader:
         if self.current_action and self.current_action.action != 'idle':
             modus = f"{self.current_action.action}({self.current_action.power_kw:.1f}kW)"
         elif self._self_consume_active:
-            modus = "self-consume(0W)"
+            sp = getattr(self.victron, '_last_setpoint', 0)
+            modus = f"natt-tøm({sp/1000:.1f}kW)" if sp < -50 else "self-consume(0W)"
         elif self._dvcc_charging_stopped:
             modus = "DVCC-stopp(sol-eksport)"
         else:
