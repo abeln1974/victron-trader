@@ -405,7 +405,11 @@ class EnergyTrader:
             return
 
         # --- 6. Self-consume: batteri dekker husforbruk ---
-        if not is_daytime:
+        # Natt-unntak: tøm batteri til lademål hvis SOC > lademål + 5% og EVCS ikke lader.
+        # Gir plass til morgendagens sol uten å eksportere til nett.
+        night_drain = not is_daytime and soc > target + 5.0
+
+        if not is_daytime and not night_drain:
             if self._self_consume_active:
                 logger.info("[P6] Self-consume: natt — stopper, beholder batteri til sol")
                 self._self_consume_active = False
@@ -444,14 +448,15 @@ class EnergyTrader:
             return
 
         if avg_grid_kw >= 0.15:
+            mode_tag = f"natt-tøm (SOC {soc:.1f}%→{target:.1f}%)" if night_drain else f"SOC {soc:.1f}% > mål {target:.1f}%"
             logger.info(
-                f"[P6] Self-consume START: SOC {soc:.1f}% > mål {target:.1f}%, "
+                f"[P6] Self-consume START: {mode_tag}, "
                 f"grid {avg_grid_kw:.2f}kW sol {solar_w:.0f}W → setpoint 0W"
             )
             self._self_consume_active = True
             self.victron.set_grid_setpoint(0)
         else:
-            logger.debug(f"[P6] Grid {avg_grid_kw:.2f}kW < 0.15kW — sol dekker forbruket, idle")
+            logger.debug(f"[P6] Grid {avg_grid_kw:.2f}kW < 0.15kW — {'natt-idle' if night_drain else 'sol dekker forbruket'}, idle")
 
     def _execute_trade_cycle(self):
         try:
