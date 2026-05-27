@@ -127,7 +127,10 @@ class Optimizer:
             solar_kwh_override=solar_kwh_tomorrow if solar_kwh_tomorrow > 0 else None,
         )
         # Storm-mode: Lad til høyere SOC for å ha backup
-        charge_target_soc = self.max_soc if storm_mode else (self.max_soc - solar_reserve_pct)
+        charge_target_soc = self.max_soc if storm_mode else max(
+            effective_min_soc + 5.0,           # Aldri under min_soc + 5% buffer
+            self.max_soc - solar_reserve_pct    # Sol-reserve
+        )
         charge_hours = set()
         night_candidates = sorted(
             [(i, bp) for i, bp in enumerate(buy_prices)
