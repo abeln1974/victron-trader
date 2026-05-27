@@ -323,7 +323,7 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
     <div class="card card-glow-brand p-4 md:col-span-2">
       <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-4">Energiflyt — live</div>
 
-      <!-- Top flow: Grid ←→ Hus ←→ Sol -->
+      <!-- Rad 1: Grid ←→ Hus ←→ Sol -->
       <div class="flex items-center justify-around">
 
         <div class="flex flex-col items-center gap-1 w-20">
@@ -357,17 +357,39 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
 
       </div>
 
-      <!-- Bottom flow: Batteri + EVCS -->
-      <div class="flex items-center justify-center gap-3 mt-5 pt-4 border-t border-slate-800">
-        <div class="text-xs text-slate-400 mono" id="fBatFlow">Batteri: —</div>
-        <svg width="80" height="14" class="shrink-0">
-          <line id="lineBat" x1="2" y1="7" x2="78" y2="7" stroke="#22c55e" stroke-width="2" stroke-dasharray="6 4"/>
+      <!-- Rad 2: Batteri ←→ Hus ←→ EVCS -->
+      <div class="flex items-center justify-around mt-5 pt-4 border-t border-slate-800">
+
+        <div class="flex flex-col items-center gap-1 w-20">
+          <div class="text-3xl">&#128267;</div>
+          <div class="text-xs text-slate-500">Batteri</div>
+          <div class="mono text-sm font-semibold" id="fBatW">— W</div>
+          <div class="text-xs" id="fBatSub"></div>
+        </div>
+
+        <svg width="64" height="20" class="shrink-0">
+          <line id="lineBat" x1="2" y1="10" x2="62" y2="10" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="6 4"/>
+          <polygon id="arrowBat" points="62,10 52,5 52,15" fill="#22c55e"/>
         </svg>
-        <div class="text-xs text-slate-500">&#8597; bat</div>
-      </div>
-      <div class="flex items-center justify-center gap-3 mt-2">
-        <div class="text-xs mono" id="fEvcsFlow"><span class="text-slate-500">EVCS: </span><span id="fEvcsW" class="text-slate-400">—</span></div>
-        <div class="text-xs text-slate-500" id="fEvcsStatus"></div>
+
+        <div class="flex flex-col items-center gap-1 w-20">
+          <div class="text-3xl">&#127968;</div>
+          <div class="text-xs text-slate-500">Forbruk</div>
+          <div class="mono text-sm font-semibold text-slate-200">&#160;</div>
+        </div>
+
+        <svg width="64" height="20" class="shrink-0">
+          <line id="lineEvcs" x1="2" y1="10" x2="62" y2="10" stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="6 4"/>
+          <polygon id="arrowEvcs" points="62,10 52,5 52,15" fill="#22d3ee"/>
+        </svg>
+
+        <div class="flex flex-col items-center gap-1 w-20">
+          <div class="text-3xl">&#128663;</div>
+          <div class="text-xs text-slate-500">EVCS</div>
+          <div class="mono text-sm font-semibold" id="fEvcsW" style="color:#22d3ee">— W</div>
+          <div class="text-xs text-slate-500" id="fEvcsStatus"></div>
+        </div>
+
       </div>
     </div>
 
@@ -638,8 +660,10 @@ async function fetchAll() {
   document.getElementById('fGridSub').textContent = gridW<-50?'↑ eksport':gridW>50?'↓ import':'';
   document.getElementById('fSolar').textContent = fmtW(solarW);
   document.getElementById('fLoad').textContent  = fmtW(Math.max(0,loadW));
-  document.getElementById('fBatFlow').textContent = 'Batteri: '+fmtW(batW)+(batW>50?' ↑ lader':batW<-50?' ↓ utlader':'');
-  document.getElementById('fBatFlow').style.color = batW<-50?'#f97316':batW>50?'#22c55e':'#94a3b8';
+  document.getElementById('fBatW').textContent  = fmtW(batW);
+  document.getElementById('fBatW').style.color   = batW<-50?'#f97316':batW>50?'#22c55e':'#64748b';
+  document.getElementById('fBatSub').textContent = batW>50?'↑ lader':batW<-50?'↓ utlader':'';
+  document.getElementById('fBatSub').style.color = batW<-50?'#f97316':batW>50?'#22c55e':'#64748b';
 
   // Battery
   document.getElementById('socVal').textContent = soc?soc.toFixed(1)+'%':'—%';
@@ -658,13 +682,22 @@ async function fetchAll() {
   // Flow arrows
   setFlow('lineGrid',  Math.abs(gridW)>20, gridW<0);
   setFlow('lineSolar', solarW>20, false);
-  setFlow('lineBat',   Math.abs(batW)>20, batW>0);
+  // Batteri rad 2: pil viser retning (lader=mot hus, utlader=mot hus samme retning)
+  const batActive = Math.abs(batW)>20;
+  const batColor  = batW<-50?'#f97316':batW>50?'#22c55e':'#22c55e';
+  setFlow('lineBat', batActive, false);
+  const abat = document.getElementById('arrowBat');
+  if(abat){ abat.style.opacity=batActive?'1':'0.12'; abat.setAttribute('fill',batColor); }
+  document.getElementById('lineBat').setAttribute('stroke', batColor);
 
-  // EVCS
+  // EVCS rad 2
   const EVCS_STATUS = {0:'frakoblet',1:'tilkoblet',2:'lader',3:'ferdig ladet',4:'venter sol',7:'lav SOC',21:'starter',24:'stopper'};
+  const evcsActive = evcsW>50;
+  setFlow('lineEvcs', evcsActive, false);
+  document.getElementById('arrowEvcs').style.opacity = evcsActive?'1':'0.12';
   document.getElementById('fEvcsW').textContent = evcsW>50?fmtW(evcsW):(evcsSt!=null&&evcsSt!==0?'0 W':'—');
-  document.getElementById('fEvcsW').style.color = evcsW>50?'#22d3ee':'#64748b';
-  document.getElementById('fEvcsStatus').textContent = evcsSt!=null?'('+( EVCS_STATUS[evcsSt]||'status '+evcsSt)+')':'';
+  document.getElementById('fEvcsW').style.color = evcsActive?'#22d3ee':'#64748b';
+  document.getElementById('fEvcsStatus').textContent = evcsSt!=null?(EVCS_STATUS[evcsSt]||'st.'+evcsSt):'';
 
   // arrowhead Grid direction
   const ag = document.getElementById('arrowGrid');
