@@ -325,12 +325,10 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
   <div class="dot-pulse"></div>
 </header>
 
-<main class="max-w-5xl mx-auto px-3 py-4 space-y-4">
+<main class="max-w-7xl mx-auto px-3 py-4 space-y-4">
 
-  <!-- ROW 1: Energiflyt (3/5) + Batteri (2/5) -->
-  <section class="grid grid-cols-1 md:grid-cols-5 gap-3">
-
-    <div class="card card-glow-brand p-4 md:col-span-3">
+  <!-- ROW 1: Energiflyt full bredde -->
+  <div class="card card-glow-brand p-4">
       <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Energiflyt — live</div>
 
       <!-- SVG nodediagram
@@ -394,29 +392,10 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
         <text x="230" y="334"  text-anchor="middle" fill="#22c55e" font-size="12" font-family="monospace" font-weight="700" id="fBatW">— W</text>
         <text x="230" y="348"  text-anchor="middle" fill="#64748b" font-size="10" id="fBatSub"></text>
       </svg>
-    </div>
+  </div>
 
-    <!-- Batteri -->
-    <div class="card card-glow-bat p-4 md:col-span-2 flex flex-col items-center justify-center gap-3">
-      <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Batteri</div>
-      <div class="relative" style="width:56px;height:94px;">
-        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-2.5 rounded-t bg-slate-600"></div>
-        <div class="absolute top-2.5 inset-x-0 bottom-0 border-2 border-slate-600 rounded-b rounded-t-sm overflow-hidden bg-slate-900">
-          <div class="absolute bottom-0 inset-x-0 bar-anim" id="batFill" style="height:65%;background:linear-gradient(180deg,#15803d,#22c55e);"></div>
-          <div class="absolute inset-0 flex items-center justify-center mono text-xs font-bold text-white drop-shadow" id="batPctLabel">—%</div>
-        </div>
-      </div>
-      <div class="text-center">
-        <div class="mono text-3xl font-bold text-bat" id="socVal">—%</div>
-        <div class="text-xs text-slate-500 mt-1" id="socTarget">lademål: —%</div>
-        <div class="mono text-sm mt-2" id="batWval">—</div>
-      </div>
-    </div>
-
-  </section>
-
-  <!-- ROW 2: Stat cards -->
-  <section class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+  <!-- ROW 2: Stat cards + Batteri -->
+  <section class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
     <div class="card card-glow-solar p-3">
       <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Spot nå</div>
       <div class="mono text-2xl font-bold text-solar" id="cSpot">—</div>
@@ -436,6 +415,22 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
       <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Arbitrasje-margin</div>
       <div class="mono text-2xl font-bold text-brand" id="cMargin">— ø</div>
       <div class="text-xs text-slate-500 mt-1">spread kjøp/salg</div>
+    </div>
+    <!-- Batteri SOC-kort -->
+    <div class="card card-glow-bat p-3 flex flex-col items-center justify-center gap-2">
+      <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest">Batteri</div>
+      <div class="relative" style="width:40px;height:68px;">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-4 h-2 rounded-t bg-slate-600"></div>
+        <div class="absolute top-2 inset-x-0 bottom-0 border-2 border-slate-600 rounded-b rounded-t-sm overflow-hidden bg-slate-900">
+          <div class="absolute bottom-0 inset-x-0 bar-anim" id="batFill" style="height:65%;background:linear-gradient(180deg,#15803d,#22c55e);"></div>
+          <div class="absolute inset-0 flex items-center justify-center mono text-xs font-bold text-white drop-shadow" id="batPctLabel">—%</div>
+        </div>
+      </div>
+      <div class="text-center">
+        <div class="mono text-2xl font-bold text-bat" id="socVal">—%</div>
+        <div class="text-xs text-slate-500" id="socTarget">mål: —%</div>
+        <div class="mono text-xs mt-1" id="batWval">—</div>
+      </div>
     </div>
   </section>
 
