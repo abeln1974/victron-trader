@@ -334,57 +334,58 @@ body{font-family:'Inter',sans-serif;background:#0b1120;color:#e2e8f0;}
       <div class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-2">Energiflyt — live</div>
 
       <!-- SVG nodediagram: 5 bobler rundt hus i midten -->
-      <svg id="flowSvg" viewBox="0 0 420 260" width="100%" style="max-height:260px;display:block">
+      <!-- Layout: cx/cy med full padding. Sol topp=60, Bat bunn=300, Grid left=65, EVCS right=375, Hus=220x180 -->
+      <svg id="flowSvg" viewBox="0 0 440 360" width="100%" style="display:block">
         <defs>
-          <marker id="arrGrid"  markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><polygon points="0 0, 7 3.5, 0 7" fill="#818cf8"/></marker>
-          <marker id="arrSol"   markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><polygon points="0 0, 7 3.5, 0 7" fill="#f59e0b"/></marker>
-          <marker id="arrBat"   markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><polygon points="0 0, 7 3.5, 0 7" fill="#22c55e"/></marker>
-          <marker id="arrEvcs"  markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><polygon points="0 0, 7 3.5, 0 7" fill="#22d3ee"/></marker>
-          <marker id="arrGridR" markerWidth="7" markerHeight="7" refX="2" refY="3.5" orient="auto"><polygon points="7 0, 0 3.5, 7 7" fill="#22c55e"/></marker>
-          <marker id="arrBatR"  markerWidth="7" markerHeight="7" refX="2" refY="3.5" orient="auto"><polygon points="7 0, 0 3.5, 7 7" fill="#f97316"/></marker>
+          <marker id="arrGrid"  markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#818cf8"/></marker>
+          <marker id="arrSol"   markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#f59e0b"/></marker>
+          <marker id="arrBat"   markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#22c55e"/></marker>
+          <marker id="arrEvcs"  markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0, 8 4, 0 8" fill="#22d3ee"/></marker>
+          <marker id="arrGridR" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><polygon points="8 0, 0 4, 8 8" fill="#22c55e"/></marker>
+          <marker id="arrBatR"  markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto"><polygon points="8 0, 0 4, 8 8" fill="#f97316"/></marker>
         </defs>
 
-        <!-- Linjer mellom noder (tegnes bak boblene) -->
-        <!-- Grid — Hus -->
-        <line id="lineGrid" x1="95" y1="130" x2="185" y2="130" stroke="#818cf8" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.2" marker-end="url(#arrGrid)"/>
-        <!-- Sol — Hus -->
-        <line id="lineSolar" x1="210" y1="45" x2="210" y2="95" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.2" marker-end="url(#arrSol)"/>
-        <!-- Batteri — Hus -->
-        <line id="lineBat" x1="210" y1="215" x2="210" y2="165" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.2" marker-end="url(#arrBat)"/>
-        <!-- Hus — EVCS -->
-        <line id="lineEvcs" x1="235" y1="130" x2="320" y2="130" stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.2" marker-end="url(#arrEvcs)"/>
+        <!-- Linjer (bak boblene): fra kant til kant -->
+        <!-- Grid kant-høyre(65+56=121) → Hus kant-venstre(220-50=170) -->
+        <line id="lineGrid"  x1="122" y1="180" x2="169" y2="180" stroke="#818cf8" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.15" marker-end="url(#arrGrid)"/>
+        <!-- Sol kant-bunn(62+48=110) → Hus kant-topp(180-50=130) -->
+        <line id="lineSolar" x1="220" y1="111" x2="220" y2="129" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.15" marker-end="url(#arrSol)"/>
+        <!-- Bat kant-topp(298-48=250) → Hus kant-bunn(180+50=230) -->
+        <line id="lineBat"   x1="220" y1="249" x2="220" y2="231" stroke="#22c55e" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.15" marker-end="url(#arrBat)"/>
+        <!-- Hus kant-høyre(220+50=270) → EVCS kant-venstre(375-52=323) -->
+        <line id="lineEvcs"  x1="271" y1="180" x2="322" y2="180" stroke="#22d3ee" stroke-width="2.5" stroke-dasharray="6 4" opacity="0.15" marker-end="url(#arrEvcs)"/>
 
-        <!-- Boble: Grid (venstre) -->
-        <circle cx="60" cy="130" r="52" fill="none" stroke="#818cf8" stroke-width="2"/>
-        <text x="60" y="112" text-anchor="middle" font-size="22">🔌</text>
-        <text x="60" y="128" text-anchor="middle" fill="#818cf8" font-size="9" font-family="monospace" font-weight="600" id="fGrid">— W</text>
-        <text x="60" y="140" text-anchor="middle" fill="#64748b" font-size="8" id="fGridSub"></text>
-        <text x="60" y="152" text-anchor="middle" fill="#64748b" font-size="8">Grid</text>
+        <!-- Boble: Sol (topp) cx=220 cy=62 r=48 -->
+        <circle cx="220" cy="62" r="48" fill="none" stroke="#f59e0b" stroke-width="2"/>
+        <text x="220" y="50" text-anchor="middle" font-size="20">☀️</text>
+        <text x="220" y="66" text-anchor="middle" fill="#f59e0b" font-size="11" font-family="monospace" font-weight="700" id="fSolar">— W</text>
+        <text x="220" y="80" text-anchor="middle" fill="#64748b" font-size="9">Sol</text>
 
-        <!-- Boble: Sol (topp) -->
-        <circle cx="210" cy="30" r="42" fill="none" stroke="#f59e0b" stroke-width="2"/>
-        <text x="210" y="18" text-anchor="middle" font-size="18">☀️</text>
-        <text x="210" y="32" text-anchor="middle" fill="#f59e0b" font-size="9" font-family="monospace" font-weight="600" id="fSolar">— W</text>
-        <text x="210" y="44" text-anchor="middle" fill="#64748b" font-size="8">Sol</text>
+        <!-- Boble: Grid (venstre) cx=65 cy=180 r=56 -->
+        <circle cx="65" cy="180" r="56" fill="none" stroke="#818cf8" stroke-width="2"/>
+        <text x="65" y="163" text-anchor="middle" font-size="20">🔌</text>
+        <text x="65" y="180" text-anchor="middle" fill="#818cf8" font-size="11" font-family="monospace" font-weight="700" id="fGrid">— W</text>
+        <text x="65" y="193" text-anchor="middle" fill="#64748b" font-size="9" id="fGridSub"></text>
+        <text x="65" y="206" text-anchor="middle" fill="#64748b" font-size="9">Grid</text>
 
-        <!-- Boble: Hus (midten) -->
-        <circle cx="210" cy="130" r="46" fill="#0f172a" stroke="#38bdf8" stroke-width="2.5"/>
-        <text x="210" y="117" text-anchor="middle" font-size="22">🏠</text>
-        <text x="210" y="134" text-anchor="middle" fill="#e2e8f0" font-size="9" font-family="monospace" font-weight="700" id="fLoad">— W</text>
-        <text x="210" y="147" text-anchor="middle" fill="#64748b" font-size="8">Forbruk</text>
+        <!-- Boble: Hus (midten) cx=220 cy=180 r=50 -->
+        <circle cx="220" cy="180" r="50" fill="#0f172a" stroke="#38bdf8" stroke-width="2.5"/>
+        <text x="220" y="164" text-anchor="middle" font-size="22">🏠</text>
+        <text x="220" y="182" text-anchor="middle" fill="#e2e8f0" font-size="11" font-family="monospace" font-weight="700" id="fLoad">— W</text>
+        <text x="220" y="196" text-anchor="middle" fill="#64748b" font-size="9">Forbruk</text>
 
-        <!-- Boble: Batteri (bunn) -->
-        <circle cx="210" cy="230" r="42" fill="none" stroke="#22c55e" stroke-width="2" id="batCircle"/>
-        <text x="210" y="218" text-anchor="middle" font-size="18">🔋</text>
-        <text x="210" y="232" text-anchor="middle" fill="#22c55e" font-size="9" font-family="monospace" font-weight="600" id="fBatW">— W</text>
-        <text x="210" y="244" text-anchor="middle" fill="#64748b" font-size="8" id="fBatSub"></text>
+        <!-- Boble: EVCS (høyre) cx=375 cy=180 r=52 -->
+        <circle cx="375" cy="180" r="52" fill="none" stroke="#22d3ee" stroke-width="2" id="evcsCircle"/>
+        <text x="375" y="163" text-anchor="middle" font-size="20">�</text>
+        <text x="375" y="180" text-anchor="middle" fill="#22d3ee" font-size="11" font-family="monospace" font-weight="700" id="fEvcsW">— W</text>
+        <text x="375" y="193" text-anchor="middle" fill="#64748b" font-size="9" id="fEvcsStatus">—</text>
+        <text x="375" y="206" text-anchor="middle" fill="#64748b" font-size="9">EVCS</text>
 
-        <!-- Boble: EVCS (høyre) -->
-        <circle cx="362" cy="130" r="48" fill="none" stroke="#22d3ee" stroke-width="2" id="evcsCircle"/>
-        <text x="362" y="114" text-anchor="middle" font-size="20">🚗</text>
-        <text x="362" y="130" text-anchor="middle" fill="#22d3ee" font-size="9" font-family="monospace" font-weight="600" id="fEvcsW">— W</text>
-        <text x="362" y="142" text-anchor="middle" fill="#64748b" font-size="8" id="fEvcsStatus">—</text>
-        <text x="362" y="153" text-anchor="middle" fill="#64748b" font-size="8">EVCS</text>
+        <!-- Boble: Batteri (bunn) cx=220 cy=298 r=48 -->
+        <circle cx="220" cy="298" r="48" fill="none" stroke="#22c55e" stroke-width="2" id="batCircle"/>
+        <text x="220" y="284" text-anchor="middle" font-size="20">�</text>
+        <text x="220" y="300" text-anchor="middle" fill="#22c55e" font-size="11" font-family="monospace" font-weight="700" id="fBatW">— W</text>
+        <text x="220" y="314" text-anchor="middle" fill="#64748b" font-size="9" id="fBatSub"></text>
       </svg>
     </div>
 
@@ -533,7 +534,7 @@ function setModePill(action) {
   el.textContent = cfg.label;
 }
 
-// Flow line animation — bruker style direkte da SVG class-arv er upålitelig
+// Flow line animation
 function setFlow(id, active, reverse) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -545,6 +546,19 @@ function setFlow(id, active, reverse) {
     el.style.strokeDasharray = '4 4';
     el.style.animation = 'none';
   }
+}
+
+// SVG nodediagram helpers (globalt scope)
+function svgTxt(id, val, col) {
+  const el = document.getElementById(id); if(!el) return;
+  el.textContent = val; if(col) el.setAttribute('fill', col);
+}
+function svgLine(id, active, col, mEnd, mStart) {
+  const el = document.getElementById(id); if(!el) return;
+  el.setAttribute('stroke', col);
+  el.setAttribute('marker-end',   mEnd   ? 'url(#'+mEnd+')' : 'none');
+  el.setAttribute('marker-start', mStart ? 'url(#'+mStart+')' : 'none');
+  setFlow(id, active, false);
 }
 
 // Price bars
@@ -667,19 +681,15 @@ async function fetchAll() {
   const loadW   = solarW + gridW - batW;
 
   // SVG nodediagram — tekst i bobler
-  function svgTxt(id, val, col) {
-    const el = document.getElementById(id); if(!el) return;
-    el.textContent = val; if(col) el.setAttribute('fill', col);
-  }
-  svgTxt('fGrid',    fmtW(gridW),           gridW>50?'#818cf8':gridW<-50?'#22c55e':'#64748b');
+  svgTxt('fGrid',    fmtW(gridW),             gridW>50?'#818cf8':gridW<-50?'#22c55e':'#64748b');
   svgTxt('fGridSub', gridW<-50?'↑ eksport':gridW>50?'↓ import':'', '#64748b');
-  svgTxt('fSolar',   fmtW(solarW),          '#f59e0b');
+  svgTxt('fSolar',   fmtW(solarW),            '#f59e0b');
   svgTxt('fLoad',    fmtW(Math.max(0,loadW)), '#e2e8f0');
   const batCol = batW<-50?'#f97316':batW>50?'#22c55e':'#64748b';
-  svgTxt('fBatW',  fmtW(batW), batCol);
-  svgTxt('fBatSub', batW>50?'↑ lader':batW<-50?'↓ utlader':'', batCol);
+  svgTxt('fBatW',    fmtW(batW),              batCol);
+  svgTxt('fBatSub',  batW>50?'↑ lader':batW<-50?'↓ utlader':'', batCol);
   const bc = document.getElementById('batCircle');
-  if(bc) bc.setAttribute('stroke', batW<-50?'#f97316':batW>50?'#22c55e':'#22c55e');
+  if(bc) bc.setAttribute('stroke', batW<-50?'#f97316':'#22c55e');
 
   // Battery
   document.getElementById('socVal').textContent = soc?soc.toFixed(1)+'%':'—%';
@@ -696,28 +706,19 @@ async function fetchAll() {
   }
 
   // SVG nodediagram — linjer og piler
-  function svgLine(id, active, col, mEnd, mStart) {
-    const el = document.getElementById(id); if(!el) return;
-    el.style.opacity = active ? '1' : '0.15';
-    el.setAttribute('stroke', col);
-    el.setAttribute('marker-end',   mEnd   ? 'url(#'+mEnd+')' : 'none');
-    el.setAttribute('marker-start', mStart ? 'url(#'+mStart+')' : 'none');
-  }
-  // Grid: eksport = pil fra hus mot grid (mStart), import = pil mot hus (mEnd)
-  if(gridW < -50) svgLine('lineGrid', true,  '#22c55e', null, 'arrGridR');
+  if(gridW < -50) svgLine('lineGrid', true,              '#22c55e', null,      'arrGridR');
   else            svgLine('lineGrid', Math.abs(gridW)>20, '#818cf8', 'arrGrid', null);
   svgLine('lineSolar', solarW>20, '#f59e0b', 'arrSol', null);
-  // Batteri: utlader=fra bat mot hus (mEnd opp), lader=fra hus mot bat (mStart opp)
   const batCol2 = batW<-50?'#f97316':'#22c55e';
-  if(batW < -50) svgLine('lineBat', true,  batCol2, 'arrBat',  null);  // utlader → hus
-  else           svgLine('lineBat', batW>50, batCol2, null, 'arrBatR'); // lader ← hus
+  if(batW < -50) svgLine('lineBat', true,    batCol2, 'arrBat',  null);
+  else           svgLine('lineBat', batW>50,  batCol2, null,      'arrBatR');
 
-  // EVCS SVG boble
+  // EVCS SVG
   const EVCS_STATUS = {0:'frakoblet',1:'tilkoblet',2:'lader',3:'ferdig ladet',4:'venter sol',7:'lav SOC',21:'starter',24:'stopper'};
   const evcsActive = evcsW>50;
   svgLine('lineEvcs', evcsSt!=null&&evcsSt!==0, '#22d3ee', 'arrEvcs', null);
-  svgTxt('fEvcsW',     evcsW>50?fmtW(evcsW):(evcsSt!=null&&evcsSt!==0?'0 W':'—'), evcsActive?'#22d3ee':'#64748b');
-  svgTxt('fEvcsStatus', evcsSt!=null?(EVCS_STATUS[evcsSt]||'st.'+evcsSt):'', '#64748b');
+  svgTxt('fEvcsW',      evcsW>50?fmtW(evcsW):(evcsSt!=null&&evcsSt!==0?'0 W':'—'), evcsActive?'#22d3ee':'#64748b');
+  svgTxt('fEvcsStatus', evcsSt!=null?(EVCS_STATUS[evcsSt]||'st.'+evcsSt):'',           '#64748b');
   const ec = document.getElementById('evcsCircle');
   if(ec) ec.setAttribute('stroke', evcsActive?'#22d3ee':(evcsSt===0||evcsSt==null)?'#334155':'#94a3b8');
 
