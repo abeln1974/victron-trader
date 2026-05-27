@@ -77,9 +77,14 @@ class Optimizer:
             return (FIXED_PRICE_ORE + grid + CONSUMPTION_TAX_ORE + ENOVA_ORE) * TARIFF_VAT
 
         # Topp-N strategi: velg de beste timene batteriet faktisk rekker
-        # Bruk max_soc som planlagt SOC — vi antar batteriet lades fullt om natten
-        # før neste dags discharge-timer. Dette sikrer at vi planlegger for full kapasitet.
-        planned_soc = max(current_soc, self.max_soc)  # Anta full lading før neste dag
+        # Hvis det er natte-timer igjen i planperioden kan batteriet lades — anta max_soc.
+        # Hvis alle natte-timer er passert (resten av dagen er dag), bruk current_soc.
+        has_night_ahead = any(
+            not (6 <= p.timestamp.astimezone(OSLO_TZ).hour < 22)
+            for p in prices
+        )
+        planned_soc = self.max_soc if has_night_ahead else current_soc
+        planned_soc = max(current_soc, planned_soc)  # Aldri lavere enn faktisk SOC
         usable_kwh = self.capacity * (planned_soc - self.min_soc) / 100 - self.peak_reserve
         remaining_kwh = max(0, usable_kwh)
 
