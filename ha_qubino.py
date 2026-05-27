@@ -285,7 +285,11 @@ class EVCSController:
         return ok
 
     def set_charge_current(self, amps: int) -> bool:
-        """Sett ladestrøm i Ampere (6-max_a). 0 = stopp."""
+        """Sett ladestrøm i Ampere (6-max_a). 0 = stopp.
+
+        Bytter til 'manual' modus slik at EVCS ikke overstyrer med sin
+        egen sol-logikk ('waiting_for_sun' i auto-modus).
+        """
         if not self.is_connected():
             return True
         if amps <= 0:
@@ -295,6 +299,10 @@ class EVCSController:
             return True  # Ingen endring
         logger.info(f"EVCS: setter ladestrøm {amps}A "
                     f"({amps * self._phases * 0.23:.1f} kW approx)")
+        # Bytt til manual slik at EVCS ikke overstyrer med auto/waiting_for_sun
+        self._call("select", "select_option", {
+            "entity_id": f"select.{self._prefix}_mode",
+            "option": "manual"})
         ok1 = self._call("number", "set_value", {
             "entity_id": f"number.{self._prefix}_charge_current_setpoint",
             "value": amps})
@@ -324,51 +332,57 @@ class EVCSController:
         """
         Juster EVCS-ladestrøm basert på nåværende situasjon.
 
+        Prioritetsrekkefølge:
+          1. Hus (alltid)
+          2. Batteri (til charge_target_soc)
+          3. Elbil (overskudd som ellers eksporteres)
+          4. Eksport til nett (kun det som gjenstår)
+
         battery_action: 'discharge', 'charge', 'idle'
-        grid_kw:        Nåværende grid-import (positiv=import, negativ=eksport)
+        grid_kw:        Nåværende grid (positiv=import, negativ=eksport)
         solar_kw:       Sol-produksjon (kW)
         battery_kw:     Batterieffekt (positiv=lading, negativ=utlading)
         """
         if not self.is_connected():
             return
 
-        # --- Scenario 1: Trader selger aktivt (Mode 3) → stopp EVCS helt ---
-        # Merk: battery_kw < 0 i Mode 2 (sol-overskudd) skal IKKE stoppe EVCS —
-        # det er naturlig ESS-eksport, ikke aktiv trader-discharge.
+        # --- P1: Trader selger aktivt → stopp EVCS ---
         if battery_action == 'discharge':
-            self.stop_charging()
+            self.stop_charging(reason="batteri selger")
             return
 
-        # --- Beregn tilgjengelig kapasitet for EVCS ---
-        # grid_kw er total fra nett (inkl batteri-lading + EVCS + husforbruk).
-        # Tilgjengelig = peak_limit - (grid uten EVCS)
+        # --- Beregn overskudd tilgjengelig for elbil ---
         evcs_kw = self.get_power_kw()
-        grid_without_evcs = grid_kw - evcs_kw  # Hva grid ville vært uten EVCS
-        available_kw = self._peak_kw - grid_without_evcs
+        grid_without_evcs = grid_kw - evcs_kw  # Grid uten EVCS
+        # Eksport-overskudd: negativ grid = eksporterer = kan gi til elbil
+        export_kw = max(0, -grid_without_evcs)
+        available_kw = self._peak_kw - max(0, grid_without_evcs)
 
-        # --- Scenario 2: Sol-overskudd om dagen → lad med overskudd ---
-        hour = __import__("datetime").datetime.now(
-            __import__("zoneinfo").ZoneInfo("Europe/Oslo")).hour
-        is_day = 6 <= hour < 22
-        if is_day and solar_kw > 0.5:
-            # Overskudd = sol - grid uten EVCS (husforbruk + evt. batteri-lading)
-            surplus_kw = solar_kw - grid_without_evcs
-            charge_kw = max(0, min(surplus_kw, available_kw,
-                                   self._max_a * self._phases * 0.23))
-            amps = int(charge_kw * 1000 / (self._phases * 230))
-            if amps >= self._min_a:
-                self.set_charge_current(amps)
-            else:
-                self.stop_charging(reason="ikke nok sol")
-            return
+        if battery_action == 'charge':
+            # Batteri lader aktivt — EVCS får kun ekte sol-eksport-overskudd
+            charge_kw = min(export_kw, available_kw,
+                            self._max_a * self._phases * 0.23)
+        else:
+            # Idle/sol-reserve — gi elbilen alt som ellers ville gått til nett
+            charge_kw = min(
+                max(export_kw, 0) + max(0, available_kw),
+                self._max_a * self._phases * 0.23,
+                available_kw
+            )
 
-        # --- Scenario 3: Natt eller idle → gi EVCS tilgjengelig kapasitet ---
-        charge_kw = max(0, min(available_kw, self._max_a * self._phases * 0.23))
+        charge_kw = max(0, charge_kw)
         amps = int(charge_kw * 1000 / (self._phases * 230))
+
         if amps >= self._min_a:
             self.set_charge_current(amps)
+            logger.debug(f"EVCS: lader {amps}A ({charge_kw:.1f}kW) — "
+                         f"eksport-overskudd {export_kw:.1f}kW brukes")
         else:
-            logger.debug(f"EVCS: ikke nok kapasitet ({available_kw:.1f}kW ledig)")
+            if self._last_current_a > 0:
+                self.stop_charging(reason="ikke nok overskudd")
+            else:
+                logger.debug(f"EVCS: venter — overskudd {export_kw:.2f}kW "
+                             f"< min {self._min_a * self._phases * 0.23:.1f}kW")
 
 
 if __name__ == "__main__":
