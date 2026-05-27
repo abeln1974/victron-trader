@@ -48,8 +48,8 @@ class PriceFetcher:
         points = []
         for item in data:
             ts  = datetime.fromisoformat(item["time_start"].replace("Z", "+00:00")).astimezone(OSLO_TZ)
-            ore = item["NOK_per_kWh"] * 100
-            nok = item["NOK_per_kWh"] * CONFIG.vat
+            nok = item["NOK_per_kWh"]                  # inkl mva — slik hvakoster.no leverer
+            ore = nok / CONFIG.vat * 100               # eks mva i øre (Nordpool spot eks mva)
             points.append(PricePoint(timestamp=ts, price_ore_kwh=ore, price_nok_kwh=nok))
         return points
 
