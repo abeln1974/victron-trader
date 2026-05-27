@@ -12,8 +12,8 @@ Automatisk styring av Victron ESS med tre strategier: **self-consumption** (batt
 | Sol | Fronius Primo 5kW (AC-koblet på AC-out — **ikke** DC-bussen) |
 | Grid-måler | Qubino ZMNHXD 3-fase (primær, via HA) — sensor `_kwh_3` og `_w_6` |
 | Grid-måler fallback | VM-3P75CT via Victron Modbus (mangler L3 på IT-nett) |
-| Home Assistant | RPi5, 192.168.1.34, https://homeassistant.abelgaard.no |
-| EVCS | HQ2309VTVNF, 1-fase, 6–16A via HA |
+| Home Assistant | RPi5, 192.168.1.34, https://homeassistant.abelgaard.no (kun Qubino) |
+| EVCS | HQ2309VTVNF (AC22NS V2), 1-fase, 6–16A — **direkte Modbus TCP** 192.168.1.45:502 |
 | Strømleverandør | Kraftriket Solstrøm (kraftriket.no) |
 | Nettleie | Føie AS 2026, prisområde NO1 |
 
@@ -33,7 +33,7 @@ price_fetcher.py   — Spotpriser fra hvakosterstrommen.no (NO1), cachet 5 min
 optimizer.py       — Optimal lade/utlade-plan basert på pris og sol-prognose
 main.py            — Hovedloop: trading hvert 60min, _control_setpoint hvert 10s, keepalive 8s
 victron_modbus.py  — Modbus-TCP klient mot Cerbo GX (port 502)
-ha_qubino.py       — Qubino 3-fase grid-måler + EVCS-koordinering via HA REST API
+ha_qubino.py       — Qubino 3-fase grid-måler (via HA REST) + EVCSController (direkte Modbus TCP 192.168.1.45)
 tariff.py          — Føie AS 2026 kapasitetstrinn, Norgespris-tak + Kraftriket priser
 solar_forecast.py  — Sol-prognoser fra Open-Meteo (MET Norway MEPS 2.5 km), cachet 1t
 profit_tracker.py  — SQLite-logging av handler og inntjening (netto arbitrasje-profitt)
@@ -101,7 +101,30 @@ Besparelse trinn 4→3: **243.7 kr/mnd**
 
 Grid-effekt overvåkes hvert 10s via Qubino (primær) eller VM-3P75CT (fallback). Ved >9.5 kW utlades batteriet med nøyaktig nødvendig effekt. Grid- og sol-verdier leses **én gang per 10s-syklus** og deles mellom alle kontroll-funksjoner.
 
-## Viktige Modbus-registre (CCGX register-list 3.71)
+## EVCS — Victron EV Charging Station (direkte Modbus TCP)
+
+EVCS har **egen innebygd Modbus TCP-server** (WiFi, 192.168.1.45:502, unit=1) — uavhengig av Cerbo GX.
+Kilde: [victronenergy/dbus-modbus-client/ev_charger.py](https://github.com/victronenergy/dbus-modbus-client/blob/master/ev_charger.py)
+
+| Register | Beskrivelse | Skrivbar |
+|----------|-------------|----------|
+| 5009 | Mode (0=manual, 1=auto, 2=scheduled) | ✅ |
+| 5010 | StartStop (0=stopp, 1=start) | ✅ |
+| 5014 | Total AC Power (W) | ❌ |
+| 5015 | Status (0=disconnected, 1=connected, 2=charging, 3=charged, 4=wait_sun, 7=low_soc, 21=startcharge) | ❌ |
+| 5016 | SetCurrent (A) | ✅ |
+| 5017 | MaxCurrent (A) | ✅ |
+| 5018 | Actual current (÷10 = A) | ❌ |
+| 5021 | Session energy (÷100 = kWh) | ❌ |
+| 5062 | MinCurrent (A) | ✅ |
+
+**IP-robusthet:** `EVCSController._resolve_host_mdns()` gjør automatisk mDNS-oppslag (`_victron-car-charger._tcp`) hvis konfigurert IP ikke svarer — håndterer DHCP-endringer uten manuell konfig.
+
+**Anbefalt:** Sett statisk DHCP i router:
+- Cerbo GX: MAC `c0:61:9a:b5:9b:b0` → 192.168.1.60
+- EVCS: MAC `e8:31:cd:09:b2:c8` → 192.168.1.45
+
+## Viktige Modbus-registre (CCGX register-list 3.73)
 
 ### Unit ID mapping
 | Unit | Service | Beskrivelse |
@@ -130,7 +153,7 @@ Grid-effekt overvåkes hvert 10s via Qubino (primær) eller VM-3P75CT (fallback)
 
 > ✅ Reg 842: positiv=lading, negativ=utlading (verifisert mot VRM 2026-05-22).
 
-> 📄 Full register-liste: `/home/lars/Nedlastinger/CCGX-Modbus-TCP-register-list-3.71.xlsx`
+> 📄 Full register-liste: https://www.victronenergy.com/upload/documents/CCGX-Modbus-TCP-register-list-3.73.xlsx
 
 ## NMC-batteri konfig
 
@@ -160,7 +183,8 @@ NMC-kjemi degraderer ved langvarig høy SOC. Konfigurert for lang levetid:
 - Docker + Docker Compose
 - Cerbo GX med Modbus-TCP aktivert: `Settings → Services → Modbus-TCP → Enabled`
 - Dynamic ESS **deaktivert** i VRM
-- Home Assistant med Qubino Z-Wave entiteter og gyldig long-lived token
+- Home Assistant med Qubino Z-Wave entiteter og gyldig long-lived token (kun for grid-måler)
+- EVCS tilgjengelig på nettverket (192.168.1.45 — Modbus TCP port 502, ingen HA nødvendig)
 
 ### Start
 
@@ -178,7 +202,8 @@ docker compose logs -f
 ### Dashboard
 
 Åpne http://localhost:8080 — moderne Tailwind-dashboard med:
-- **Energiflyt live**: Grid ↔ Hus ↔ Sol med animerte piler (retning og styrke)
+- **Energiflyt live rad 1**: Grid ↔ Hus ↔ Sol med animerte piler (retning og styrke)
+- **Energiflyt live rad 2**: Batteri ↔ Hus ↔ EVCS med ikon, piler og status-tekst (lader/ferdig ladet/etc.)
 - **Batteri**: visuell SOC-indikator med fargeskift (grønn/gul/rød), lademål
 - **Stat-kort**: spot nå, sol nå/prognose i morgen, profitt i dag, arbitrasje-margin
 - **Spotpris 24t**: søylediagram med nåværende time uthevet
@@ -266,12 +291,14 @@ Konfig som er verifisert og anbefalt for dette systemet:
 | SOLAR_MAX_KW | 5.0 | Fronius Primo maks effekt |
 | SOLAR_SYSTEM_EFFICIENCY | 0.85 | Sol-system virkningsgrad |
 | SOLAR_EFFECTIVE_HOURS | 4.0 | Fallback sol-timer/dag |
-| EVCS_ENTITY_PREFIX | evcs_hq2309vtvnf | HA entity prefix for EVCS |
+| EVCS_HOST | 192.168.1.45 | EVCS IP-adresse (direkte Modbus TCP) |
+| EVCS_MODBUS_PORT | 502 | EVCS Modbus TCP port |
+| EVCS_UNIT_ID | 1 | EVCS Modbus unit ID |
 | EVCS_PHASES | 1 | Antall faser elbil-lader |
 | EVCS_MIN_CURRENT_A | 6 | Min ladestrøm EVCS (A) |
 | EVCS_MAX_CURRENT_A | 16 | Max ladestrøm EVCS (A) |
-| HA_URL | https://homeassistant.abelgaard.no | Home Assistant URL |
-| HA_TOKEN | — | HA long-lived access token |
+| HA_URL | https://homeassistant.abelgaard.no | Home Assistant URL (kun Qubino grid-måler) |
+| HA_TOKEN | — | HA long-lived access token (kun Qubino) |
 | HA_MIN_INTERVAL | 10.0 | Minimum sekunder mellom HA-kall (matcher Qubino P42) |
 | DB_PATH | /app/data/profit.db | Database-sti |
 | READONLY_MODE | false | true = ingen skriving til Cerbo |
