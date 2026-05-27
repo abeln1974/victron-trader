@@ -46,11 +46,13 @@ class Config:
     peak_limit_kw: float = float(os.getenv("PEAK_LIMIT_KW", "9.5"))  # Buffer til 10kW-trinnet
     peak_reserve_kwh: float = float(os.getenv("PEAK_RESERVE_KWH", "5.0"))
 
-    # EVCS elbil-lader (via Home Assistant)
-    evcs_entity_prefix: str = os.getenv("EVCS_ENTITY_PREFIX", "evcs_hq2309vtvnf")
+    # EVCS elbil-lader (Victron EV Charging Station, direkte Modbus TCP)
+    evcs_host: str = os.getenv("EVCS_HOST", "192.168.1.45")
+    evcs_modbus_port: int = int(os.getenv("EVCS_MODBUS_PORT", "502"))
+    evcs_unit_id: int = int(os.getenv("EVCS_UNIT_ID", "1"))
     evcs_min_current_a: int = int(os.getenv("EVCS_MIN_CURRENT_A", "6"))   # Min ladestrøm (A)
     evcs_max_current_a: int = int(os.getenv("EVCS_MAX_CURRENT_A", "16"))  # Max vi tillater (A)
-    evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (EVCS HQ2309VTVNF er 1-fase)
+    evcs_phases: int = int(os.getenv("EVCS_PHASES", "1"))                 # Antall faser (1-fase)
 
     # Strategy
     min_price_diff_nok: float = float(os.getenv("MIN_PRICE_DIFF_NOK", "1.10"))  # 1.00 kr/kWh batterislitasje + margin

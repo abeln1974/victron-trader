@@ -169,126 +169,155 @@ class QubinoReader:
 
 class EVCSController:
     """
-    Styrer EVCS elbil-lader via Home Assistant for å koordinere med batteri-trading.
+    Styrer Victron EV Charging Station via direkte Modbus TCP (192.168.1.45:502, unit=1).
+
+    Ingen Home Assistant nødvendig — kommuniserer direkte med EVCS via Victron Modbus.
+
+    Registre (unit=1, fra victronenergy/dbus-modbus-client/ev_charger.py):
+      5009 = Mode (0=manual, 1=auto, 2=scheduled)  — writeable
+      5010 = StartStop (0=stop, 1=start)            — writeable
+      5014 = Total AC Power (W)
+      5015 = Status (0=disconnected, 1=connected, 2=charging, 3=charged, 4=wait_sun, 7=low_soc)
+      5016 = SetCurrent (A)                         — writeable
+      5018 = Actual current (/10 → A)
 
     Prioriteter:
-    1. Aldri overskrid peak_limit_kw totalt (batteri + EVCS + annet forbruk)
-    2. Under batteri-eksport (salg): stopp EVCS helt
-    3. Om dagen med sol-overskudd: lad bil med overskuddsstrøm
-    4. Om natten: del tilgjengelig kapasitet mellom batteri og EVCS
-
-    EVCS sitter på AC-input (grid-siden) og teller mot kapasitetsleddet.
+      1. Batteri selger aktivt → stopp EVCS
+      2. Batteri lader aktivt → EVCS kun sol-eksport-overskudd
+      3. Idle/sol → EVCS får alt overskudd som ellers eksporteres
     """
+
+    # EVCS status-koder
+    STATUS_DISCONNECTED = 0
+    STATUS_CONNECTED    = 1
+    STATUS_CHARGING     = 2
+    STATUS_CHARGED      = 3
+    STATUS_WAIT_SUN     = 4
+    STATUS_LOW_SOC      = 7
+
+    # EVCS Modbus-registre
+    REG_MODE        = 5009
+    REG_STARTSTOP   = 5010
+    REG_POWER_TOTAL = 5014
+    REG_STATUS      = 5015
+    REG_SET_CURRENT = 5016
+    REG_MAX_CURRENT = 5017
+    REG_CURRENT     = 5018  # /10 = A
 
     def __init__(self):
         from config import CONFIG
-        self.ha_url   = os.getenv("HA_URL", "https://homeassistant.abelgaard.no")
-        self.ha_token = os.getenv("HA_TOKEN", "")
-        self._session = requests.Session()
-        self._session.headers.update({
-            "Authorization": f"Bearer {self.ha_token}",
-            "Content-Type": "application/json",
-        })
-        self._prefix  = CONFIG.evcs_entity_prefix
-        self._min_a   = CONFIG.evcs_min_current_a   # 6A
-        self._max_a   = CONFIG.evcs_max_current_a   # 16A
-        self._phases  = CONFIG.evcs_phases           # 1 (1-fase EVCS, default satt i config.py)
-        self._peak_kw = CONFIG.peak_limit_kw         # 9.5 kW
+        from pymodbus.client import ModbusTcpClient
+        self._host    = CONFIG.evcs_host
+        self._port    = CONFIG.evcs_modbus_port
+        self._unit    = CONFIG.evcs_unit_id
+        self._min_a   = CONFIG.evcs_min_current_a
+        self._max_a   = CONFIG.evcs_max_current_a
+        self._phases  = CONFIG.evcs_phases
+        self._peak_kw = CONFIG.peak_limit_kw
+        self._client  = ModbusTcpClient(self._host, port=self._port, timeout=3)
+        self._connected_modbus = False
+        self._last_current_a: int = -1
+        self._last_fetch: float = 0.0
+        self._last_warn_time: float = 0.0
         self._cache: dict = {}
-        self._last_fetch = 0.0
-        self._last_warn_time = 0.0        # Throttle feil-logging til maks 1/min
-        self._last_current_a: int = -1  # -1 = ukjent ved oppstart, synkroniseres ved første fetch
 
-    # ------------------------------------------------------------------ #
-    # HA-kall                                                              #
-    # ------------------------------------------------------------------ #
-
-    def _fetch(self) -> bool:
-        """Hent EVCS-states fra HA (maks hvert 10s)."""
-        import time as _time
-        now = _time.monotonic()
-        if now - self._last_fetch < 10:
+    def _ensure_connected(self) -> bool:
+        """Koble til EVCS Modbus hvis ikke allerede tilkoblet."""
+        if self._connected_modbus and self._client.connected:
             return True
-        # Oppdater alltid _last_fetch — også ved feil — for å unngå spam mot HA
-        self._last_fetch = now
-        wanted = {
-            f"binary_sensor.{self._prefix}_connected",
-            f"sensor.{self._prefix}_power",
-            f"sensor.{self._prefix}_current",
-            f"sensor.{self._prefix}_status",
-            f"select.{self._prefix}_mode",
-            f"switch.{self._prefix}_ev_charging",
-            f"number.{self._prefix}_charge_current_setpoint",
-        }
         try:
-            r = self._session.get(f"{self.ha_url}/api/states", timeout=3)
-            if r.status_code == 200:
-                self._cache = {s["entity_id"]: s["state"]
-                               for s in r.json() if s["entity_id"] in wanted}
-                # Synkroniser _last_current_a fra faktisk EVCS-tilstand ved oppstart
-                if self._last_current_a == -1:
-                    try:
-                        actual_a = float(self._cache.get(f"sensor.{self._prefix}_current", 0))
-                        self._last_current_a = int(actual_a)
-                        logger.info(f"EVCS oppstart-sync: faktisk strøm={self._last_current_a}A")
-                    except (ValueError, TypeError):
-                        self._last_current_a = 0
-                return True
-            else:
-                import time as _t
-                if _t.monotonic() - self._last_warn_time >= 60:
-                    logger.warning(f"HA /api/states {r.status_code} — EVCS/Qubino utilgjengelig")
-                    self._last_warn_time = _t.monotonic()
+            self._connected_modbus = self._client.connect()
+            if self._connected_modbus and self._last_current_a == -1:
+                r = self._client.read_holding_registers(
+                    address=self.REG_SET_CURRENT, count=1, device_id=self._unit)
+                if r and not r.isError():
+                    self._last_current_a = r.registers[0]
+                    logger.info(f"EVCS oppstart-sync: SetCurrent={self._last_current_a}A")
+                else:
+                    self._last_current_a = 0
         except Exception as e:
-            logger.debug(f"EVCS fetch feil: {e}")
-        return False
+            logger.debug(f"EVCS Modbus tilkobling feilet: {e}")
+            self._connected_modbus = False
+        return self._connected_modbus
 
-    def _call(self, domain: str, service: str, data: dict) -> bool:
+    def _read(self, register: int) -> Optional[int]:
+        """Les ett register fra EVCS."""
+        import time as _t
+        if not self._ensure_connected():
+            return None
         try:
-            r = self._session.post(
-                f"{self.ha_url}/api/services/{domain}/{service}",
-                json=data, timeout=5)
-            return r.status_code in (200, 201)
+            r = self._client.read_holding_registers(
+                address=register, count=1, device_id=self._unit)
+            if r and not r.isError():
+                return r.registers[0]
         except Exception as e:
-            logger.warning(f"EVCS HA-kall feil {domain}/{service}: {e}")
+            now = _t.monotonic()
+            if now - self._last_warn_time >= 60:
+                logger.warning(f"EVCS Modbus read reg {register} feil: {e}")
+                self._last_warn_time = now
+            self._connected_modbus = False
+        return None
+
+    def _write(self, register: int, value: int) -> bool:
+        """Skriv ett register til EVCS."""
+        import time as _t
+        if not self._ensure_connected():
             return False
+        try:
+            r = self._client.write_register(
+                address=register, value=value, device_id=self._unit)
+            if r and not r.isError():
+                return True
+        except Exception as e:
+            now = _t.monotonic()
+            if now - self._last_warn_time >= 60:
+                logger.warning(f"EVCS Modbus write reg {register}={value} feil: {e}")
+                self._last_warn_time = now
+            self._connected_modbus = False
+        return False
 
     # ------------------------------------------------------------------ #
     # Status                                                               #
     # ------------------------------------------------------------------ #
 
     def is_connected(self) -> bool:
-        self._fetch()
-        return self._cache.get(f"binary_sensor.{self._prefix}_connected") == "on"
+        """Sjekk om elbil er koblet til laderen."""
+        status = self._read(self.REG_STATUS)
+        if status is None:
+            return False
+        return status != self.STATUS_DISCONNECTED
 
     def get_power_kw(self) -> float:
-        self._fetch()
-        try:
-            return float(self._cache.get(f"sensor.{self._prefix}_power", 0)) / 1000
-        except (ValueError, TypeError):
+        """Nåværende ladeeffekt i kW."""
+        val = self._read(self.REG_POWER_TOTAL)
+        if val is None:
             return 0.0
+        return float(val) / 1000.0
+
+    def get_status(self) -> Optional[int]:
+        """Les EVCS status-kode."""
+        return self._read(self.REG_STATUS)
 
     # ------------------------------------------------------------------ #
     # Styring                                                              #
     # ------------------------------------------------------------------ #
 
     def stop_charging(self, reason: str = "batteri selger") -> bool:
-        """Stopp lading helt. Kaller HA kun ved statusendring."""
+        """Stopp lading. Skriver kun ved statusendring."""
         if not self.is_connected():
             return True
         if self._last_current_a == 0:
-            return True  # Allerede stoppet — ikke kall HA eller logg
+            return True
         logger.info(f"EVCS: stopper elbillading ({reason})")
-        ok = self._call("switch", "turn_off",
-                        {"entity_id": f"switch.{self._prefix}_ev_charging"})
-        self._last_current_a = 0
+        ok = self._write(self.REG_STARTSTOP, 0)
+        if ok:
+            self._last_current_a = 0
         return ok
 
     def set_charge_current(self, amps: int) -> bool:
-        """Sett ladestrøm i Ampere (6-max_a). 0 = stopp.
+        """Sett ladestrøm i Ampere (min_a–max_a). 0 = stopp.
 
-        Bytter til 'manual' modus slik at EVCS ikke overstyrer med sin
-        egen sol-logikk ('waiting_for_sun' i auto-modus).
+        Setter Mode=manual slik at EVCS ikke overstyrer med auto/wait_sun.
         """
         if not self.is_connected():
             return True
@@ -296,18 +325,12 @@ class EVCSController:
             return self.stop_charging()
         amps = max(self._min_a, min(self._max_a, amps))
         if amps == self._last_current_a:
-            return True  # Ingen endring
+            return True
         logger.info(f"EVCS: setter ladestrøm {amps}A "
                     f"({amps * self._phases * 0.23:.1f} kW approx)")
-        # Bytt til manual slik at EVCS ikke overstyrer med auto/waiting_for_sun
-        self._call("select", "select_option", {
-            "entity_id": f"select.{self._prefix}_mode",
-            "option": "manual"})
-        ok1 = self._call("number", "set_value", {
-            "entity_id": f"number.{self._prefix}_charge_current_setpoint",
-            "value": amps})
-        ok2 = self._call("switch", "turn_on",
-                         {"entity_id": f"switch.{self._prefix}_ev_charging"})
+        self._write(self.REG_MODE, 0)        # Mode = manual
+        ok1 = self._write(self.REG_SET_CURRENT, amps)
+        ok2 = self._write(self.REG_STARTSTOP, 1)
         if ok1 and ok2:
             self._last_current_a = amps
         return ok1 and ok2
@@ -317,10 +340,9 @@ class EVCSController:
         if not self.is_connected():
             return True
         logger.info("EVCS: tilbake til auto-modus")
-        ok = self._call("select", "select_option", {
-            "entity_id": f"select.{self._prefix}_mode",
-            "option": "auto"})
-        self._last_current_a = 0
+        ok = self._write(self.REG_MODE, 1)
+        if ok:
+            self._last_current_a = 0
         return ok
 
     # ------------------------------------------------------------------ #
@@ -353,8 +375,7 @@ class EVCSController:
 
         # --- Beregn overskudd tilgjengelig for elbil ---
         evcs_kw = self.get_power_kw()
-        grid_without_evcs = grid_kw - evcs_kw  # Grid uten EVCS
-        # Eksport-overskudd: negativ grid = eksporterer = kan gi til elbil
+        grid_without_evcs = grid_kw - evcs_kw
         export_kw = max(0, -grid_without_evcs)
         available_kw = self._peak_kw - max(0, grid_without_evcs)
 
@@ -405,4 +426,12 @@ if __name__ == "__main__":
     else:
         print("❌ Qubino ikke tilgjengelig")
         print("   Sjekk HA_URL, HA_TOKEN og entity-navn i ha_qubino.py")
+
+    print()
+    evcs = EVCSController()
+    status = evcs.get_status()
+    status_names = {0:'disconnected',1:'connected',2:'charging',3:'charged',4:'wait_sun',7:'low_soc'}
+    print(f"EVCS status: {status} ({status_names.get(status, 'ukjent')})")
+    print(f"EVCS power: {evcs.get_power_kw():.2f} kW")
+    print(f"EVCS koblet til: {evcs.is_connected()}")
 
