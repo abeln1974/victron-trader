@@ -221,6 +221,7 @@ class EVCSController:
         self._last_current_a: int = -1
         self._last_fetch: float = 0.0
         self._last_warn_time: float = 0.0
+        self._last_reconnect_attempt: float = 0.0
         self._cache: dict = {}
 
     def _resolve_host_mdns(self) -> Optional[str]:
@@ -260,9 +261,16 @@ class EVCSController:
 
         Ved tilkoblingsfeil forsøkes mDNS-oppslag for å finne ny IP hvis enheten
         har fått ny adresse (f.eks. etter DHCP-lease-endring).
+        Reconnect-forsøk begrenses til maks hvert 60s for å unngå TCP-flom.
         """
         if self._connected_modbus and self._client.connected:
             return True
+        import time as _t
+        now = _t.monotonic()
+        if now - self._last_reconnect_attempt < 60:
+            return False
+        self._last_reconnect_attempt = now
+        self._client.close()
         try:
             self._connected_modbus = self._client.connect()
         except Exception as e:
