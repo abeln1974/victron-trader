@@ -268,6 +268,7 @@ class EVCSController:
         import time as _t
         now = _t.monotonic()
         if now - self._last_reconnect_attempt < 60:
+            logger.debug("EVCS reconnect throttlet — venter til 60s siden forrige forsøk")
             return False
         self._last_reconnect_attempt = now
         self._client.close()

@@ -426,6 +426,7 @@ class EnergyTrader:
                 tag = "natt-tøm ferdig" if night_drain else "SOC ved lademål"
                 logger.info(f"[P6] {tag}: SOC {soc:.1f}% ≤ lademål {target:.1f}% + 1% — stopper")
                 self._self_consume_active = False
+                self._self_consume_stop_time = time.time()
                 self._grid_history.clear()
                 self.victron.stop_ess_control()
             else:
@@ -557,18 +558,19 @@ class EnergyTrader:
     def _get_storm_info(self) -> tuple:
         """Returner (storm_mode, effective_min_soc) basert på sol-prognose."""
         solar_kwh = self._get_solar_kwh_cached()
-        storm = solar_kwh < CONFIG.storm_mode_threshold_kwh
+        storm = solar_kwh is not None and solar_kwh < CONFIG.storm_mode_threshold_kwh
         return storm, (CONFIG.storm_mode_min_soc if storm else CONFIG.min_soc)
 
-    def _get_solar_kwh_cached(self) -> float:
+    def _get_solar_kwh_cached(self) -> Optional[float]:
         """Hent sol-prognose for i morgen — cachet i 1 time for å unngå gjentatte API-kall."""
         now = time.time()
         if now - self._solar_cache_time < self._SOLAR_CACHE_TTL:
             return self._solar_cache_kwh
         val = get_solar_kwh_tomorrow(CONFIG.site_lat, CONFIG.site_lon,
                                      CONFIG.solar_max_kw, CONFIG.solar_system_efficiency)
-        self._solar_cache_kwh = val
-        self._solar_cache_time = now
+        if val is not None:
+            self._solar_cache_kwh = val
+            self._solar_cache_time = now
         return val
 
     def _get_grid_power(self) -> Optional[float]:
@@ -633,7 +635,7 @@ class EnergyTrader:
             # KRITISK: Kontinuerlig MIN_SOC beskyttelse med storm mode
             # Sjekk storm mode status (samme logikk som optimizer)
             solar_kwh_tomorrow = self._get_solar_kwh_cached()
-            storm_mode = solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
+            storm_mode = solar_kwh_tomorrow is not None and solar_kwh_tomorrow < CONFIG.storm_mode_threshold_kwh
             effective_min_soc = CONFIG.storm_mode_min_soc if storm_mode else CONFIG.min_soc
             
             if soc < effective_min_soc:

@@ -115,7 +115,7 @@ def get_solar_reserve_pct(lat: float, lon: float,
     solar_kwh = solar_kwh_override if solar_kwh_override is not None else \
                 get_solar_kwh_tomorrow(lat, lon, panel_peak_kw, system_efficiency)
 
-    if solar_kwh > 0:
+    if solar_kwh is not None and solar_kwh > 0:
         reserve_pct = min(max_reserve_pct, (solar_kwh / battery_capacity_kwh) * 100)
         log.info("Dynamisk sol-reserve: %.1f%% SOC (%.1f kWh prognose i morgen)",
                  reserve_pct, solar_kwh)
